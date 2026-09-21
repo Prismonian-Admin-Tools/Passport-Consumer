@@ -1,0 +1,82 @@
+# =============================================================================
+# Passport Consumer — configuration
+# =============================================================================
+
+server:
+  bind: "127.0.0.1"
+  port: 9300
+  # Signs Passport Consumer's OWN frontend session cookie (used when a
+  # person logs into the admin panel directly). Unrelated to the opaque
+  # app tokens issued to client apps — change this to something random.
+  sessionSecret: "CHANGE_ME_TO_A_RANDOM_STRING"
+  # Encrypts values Passport Consumer must be able to read back later: the
+  # SMTP password, a user's MFA secret, and the OIDC signing key at rest.
+  # Deliberately a SEPARATE secret from sessionSecret — one key now
+  # covering two unrelated jobs (signing session cookies AND protecting
+  # data at rest) meant a leak of either purpose compromised both, and
+  # rotating sessionSecret silently broke decryption of everything else.
+  # Change this to a different random value than sessionSecret. Rotating
+  # it means re-entering the SMTP password and any enrolled MFA secrets
+  # (users just re-run setup) afterward.
+  encryptionKey: "CHANGE_ME_TO_A_DIFFERENT_RANDOM_STRING"
+  # Public base URL — used for building absolute avatar links and the
+  # links emailed by the self-service registration flow (POST /api/v1/
+  # register's verification email, /verify-email).
+  publicUrl: "https://passport.example.com"
+  # Whether (and how much) to trust X-Forwarded-For for the caller's real
+  # IP — used for login-lockout and rate-limiting. Leave `false` (the
+  # default) unless Passport Consumer sits behind a reverse proxy that
+  # OVERWRITES this header before forwarding (nginx/Caddy/etc. do this by
+  # default). Trusting it with nothing in front means any caller can set
+  # their own req.ip per request just by sending the header, defeating the
+  # login lockout entirely. If you do run behind such a proxy, set this to
+  # the number of proxy hops between the internet and Passport Consumer
+  # (usually 1).
+  trustProxy: false
+
+database:
+  host: "127.0.0.1"
+  port: 5432
+  name: "passport_consumer"
+  user: "passport_consumer"
+  password: "CHANGE_ME"
+  ssl: false
+
+avatars:
+  directory: "./data/avatars"
+
+# Self-registration (POST /api/v1/register) always creates a role: 'user'
+# account — only an admin ever deliberately creates a role: 'admin' one
+# (bootstrap, the CLI, or the admin panel). This default exists for
+# completeness/documentation; userStore.create() also defaults role to
+# 'user' on its own.
+newAccountDefaults:
+  mustChangePassword: true
+  role: "user"
+
+session:
+  # How long an app-issued opaque token stays valid without being used.
+  # Each successful /validate call slides this window forward.
+  idleTimeoutMinutes: 720   # 12 hours
+  # Hard ceiling regardless of activity — forces re-login eventually even
+  # for a token that's used constantly.
+  absoluteTtlDays: 30
+
+rateLimit:
+  login:
+    # Per (username, source IP) pair.
+    maxAttempts: 5
+    windowMinutes: 15
+    lockoutMinutes: 15
+  perApp:
+    # Overall request budget per calling application, so one misbehaving
+    # or compromised app can't hammer the whole service. Also covers
+    # POST /api/v1/register and /resend-verification — see apiV1.js's
+    # comment on why those don't get their own separate throttle.
+    maxRequestsPerMinute: 240
+
+activity:
+  file: "./data/activity.yml"
+
+failedLogins:
+  file: "./data/failed-logins.yml"

@@ -1,0 +1,25 @@
+{
+  "name": "passport-consumer",
+  "version": "1.0.0",
+  "description": "Passport Consumer — an independent identity provider fork of Global-Admin-Account-System for end-user self-service accounts on Prismonian's own apps (self-registration with email verification, a two-tier user/admin role, and its own database/app registry).",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/migrations/run.js",
+    "bootstrap": "node scripts/bootstrap.js",
+    "cli": "node scripts/passport-cli.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^10.0.0",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "js-yaml": "^4.1.0",
+    "multer": "^2.0.0",
+    "nodemailer": "^7.0.0",
+    "pg": "^8.12.0",
+    "qrcode": "^1.5.4",
+    "uuid": "^9.0.1"
+  }
+}

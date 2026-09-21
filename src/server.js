@@ -1,0 +1,221 @@
+'use strict';
+const express = require('express');
+const session = require('express-session');
+const pgSessionStore = require('connect-pg-simple')(session);
+const path = require('path');
+
+const { loadConfig } = require('./config');
+const { initPool } = require('./db');
+const { UserStore } = require('./models/userStore');
+const { AppStore } = require('./models/appStore');
+const { SessionStore } = require('./models/sessionStore');
+const { FailedLoginStore } = require('./models/failedLoginStore');
+const { ActivityLog } = require('./models/activityLog');
+const { SiteSettingsStore } = require('./models/siteSettingsStore');
+const { PasswordPolicyStore } = require('./models/passwordPolicyStore');
+const { EmailSettingsStore } = require('./models/emailSettingsStore');
+const { KnownLoginStore } = require('./models/knownLoginStore');
+const { OidcKeyStore } = require('./models/oidcKeyStore');
+const { OidcCodeStore } = require('./models/oidcCodeStore');
+const { MfaStore } = require('./models/mfaStore');
+const { MfaChallengeStore } = require('./models/mfaChallengeStore');
+const { EmailVerificationStore } = require('./models/emailVerificationStore');
+const { Mailer } = require('./utils/mailer');
+const { runPasswordExpirySweep } = require('./jobs/passwordExpirySweep');
+
+const { requireApp } = require('./middleware/appAuth');
+const { perAppRateLimit } = require('./middleware/rateLimit');
+const { securityHeaders } = require('./middleware/securityHeaders');
+const { requireAuth, requireAdmin, requireGoodStanding } = require('./middleware/frontendAuth');
+
+const apiV1Routes = require('./routes/apiV1');
+const verifyEmailRoutes = require('./routes/verifyEmail');
+const sessionRoutes = require('./routes/session');
+const accountRoutes = require('./routes/account');
+const usersRoutes = require('./routes/users');
+const appsRoutes = require('./routes/apps');
+const activityRoutes = require('./routes/activity');
+const brandingRoutes = require('./routes/branding');
+const passwordPolicyRoutes = require('./routes/passwordPolicy');
+const emailRoutes = require('./routes/email');
+const oidcRoutes = require('./routes/oidc');
+const mfaRoutes = require('./routes/mfa');
+
+const EXPIRY_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+const OIDC_CODE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const FAILED_LOGIN_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const FAILED_LOGIN_RETENTION_DAYS = 90;
+const MFA_CHALLENGE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const EMAIL_VERIFICATION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+async function main() {
+  const config = loadConfig();
+  const pool = initPool(config.database);
+
+  const emailSettingsStore = new EmailSettingsStore(pool, { encryptionKey: config.server.encryptionKey, legacySessionSecret: config.server.sessionSecret });
+  const mailer = new Mailer(emailSettingsStore);
+  const userStore = new UserStore(pool, mailer);
+  const appStore = new AppStore(pool);
+  const sessionStore = new SessionStore(pool, config.session);
+  const failedLoginStore = new FailedLoginStore(pool, config.rateLimit.login);
+  const activityLog = new ActivityLog(pool);
+  const siteSettingsStore = new SiteSettingsStore(pool);
+  const passwordPolicyStore = new PasswordPolicyStore(pool);
+  const knownLoginStore = new KnownLoginStore(pool);
+  const oidcKeyStore = new OidcKeyStore(pool, config.server.encryptionKey);
+  const oidcCodeStore = new OidcCodeStore(pool);
+  const mfaStore = new MfaStore(pool, { encryptionKey: config.server.encryptionKey, legacySessionSecret: config.server.sessionSecret });
+  const mfaChallengeStore = new MfaChallengeStore(pool);
+  const emailVerificationStore = new EmailVerificationStore(pool);
+
+  if (await userStore.isEmpty()) {
+    console.warn('\n⚠  No users exist yet in the Passport Consumer database.');
+    console.warn('   Run: npm run bootstrap\n');
+  }
+
+  // Generated eagerly, not lazily on first token request, so /.well-known/
+  // jwks.json is never emptier than reality — a client library that
+  // fetches it before anyone has ever signed in shouldn't see no keys.
+  await oidcKeyStore.getSigningKey();
+
+  // Password expiry is time passing, not an action anyone takes, so it's
+  // swept on an interval rather than triggered — see jobs/passwordExpirySweep.js.
+  const runSweep = () => runPasswordExpirySweep({ userStore, mailer }).catch((err) => console.error('Password expiry sweep failed:', err.message));
+  runSweep();
+  setInterval(runSweep, EXPIRY_SWEEP_INTERVAL_MS);
+
+  // Expired OIDC authorization codes are already unusable (consume()
+  // checks expires_at) — this just keeps the table from growing forever.
+  setInterval(() => oidcCodeStore.deleteExpired().catch((err) => console.error('OIDC code cleanup failed:', err.message)), OIDC_CODE_CLEANUP_INTERVAL_MS);
+
+  // failed_logins gets a row on every bad attempt from anyone, with no
+  // authentication at all — bounds how long those accumulate for.
+  setInterval(
+    () => failedLoginStore.deleteOlderThan(FAILED_LOGIN_RETENTION_DAYS).catch((err) => console.error('Failed-login cleanup failed:', err.message)),
+    FAILED_LOGIN_CLEANUP_INTERVAL_MS
+  );
+
+  // Expired MFA challenge tickets are already unusable (takeAttempt checks
+  // expires_at) — same as the OIDC code cleanup above, this just keeps the
+  // table from growing forever.
+  setInterval(() => mfaChallengeStore.deleteExpired().catch((err) => console.error('MFA challenge cleanup failed:', err.message)), MFA_CHALLENGE_CLEANUP_INTERVAL_MS);
+
+  // Same idea for expired-and-unused email verification tokens.
+  setInterval(() => emailVerificationStore.deleteExpired().catch((err) => console.error('Email verification cleanup failed:', err.message)), EMAIL_VERIFICATION_CLEANUP_INTERVAL_MS);
+
+  const app = express();
+  // Trusting X-Forwarded-For unconditionally (this used to be a bare `1`)
+  // lets anyone reaching Passport Consumer directly set their own req.ip
+  // on every request — defeating the (username, ip) login lockout below
+  // just by sending a different header each attempt. Off by default; a
+  // real deployment behind a reverse proxy that OVERWRITES this header
+  // (nginx, Caddy, etc. all do) should set server.trustProxy in
+  // config.yml to how many proxy hops to trust — see the example file.
+  app.set('trust proxy', config.server.trustProxy ?? false);
+  app.use(securityHeaders());
+  app.use(express.json());
+  app.use(session({
+    // express-session's default MemoryStore is explicitly not fit for
+    // production (the library's own warning): every session lost on
+    // restart, no sharing across more than one process. Backed by
+    // Postgres instead, in the frontend_sessions table (migration 004)
+    // — distinct from the existing `sessions` table, which holds opaque
+    // tokens issued to client apps, a different thing entirely.
+    store: new pgSessionStore({ pool, tableName: 'frontend_sessions', createTableIfMissing: false }),
+    // Distinct from the default 'connect.sid' (a minor stack-
+    // fingerprinting tell) and from the source project's 'gam.sid', since
+    // this is an independent service with its own cookie namespace.
+    name: 'passport.sid',
+    secret: config.server.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 12, secure: 'auto' },
+  }));
+
+  /* =========================================================
+   * App-facing API — the login status contract (good / good_change_pw /
+   * bad / disabled / unverified / good-no-access / good_mfa_required).
+   * Requires X-App-Id / X-App-Secret headers on every call.
+   * ========================================================= */
+  app.use(
+    '/api/v1',
+    requireApp(appStore),
+    perAppRateLimit(config.rateLimit.perApp),
+    apiV1Routes({ userStore, appStore, sessionStore, failedLoginStore, activityLog, passwordPolicyStore, knownLoginStore, mailer, mfaStore, mfaChallengeStore, emailVerificationStore, config })
+  );
+
+  /* =========================================================
+   * Public, unauthenticated routes reached by a human directly, not an
+   * app calling the API — no X-App-Id/X-App-Secret gate.
+   * ========================================================= */
+  // Passport Consumer as an OpenID Connect Identity Provider — for apps
+  // that can't speak the native /api/v1/login contract. Mounted at the
+  // conventional unprefixed paths OIDC client libraries expect
+  // (/.well-known/*, /oidc/*), after the session middleware (the
+  // authorize step reuses Passport Consumer's own cookie session to
+  // authenticate the human) but with none of the /api gates below — see
+  // routes/oidc.js for why.
+  app.use(oidcRoutes({ config, appStore, userStore, sessionStore, oidcKeyStore, oidcCodeStore, activityLog }));
+  // Email-verification confirmation page (see decision #2 in README) —
+  // a human clicks this from their inbox, so it needs no app credentials
+  // and no Passport Consumer frontend session either.
+  app.use(verifyEmailRoutes({ userStore, emailVerificationStore, activityLog }));
+
+  /* =========================================================
+   * Passport Consumer's own frontend — cookie-session based.
+   * Branding is mounted BEFORE requireAuth: its GET has to be reachable
+   * by a signed-out visitor (the login screen shows it), and its mutating
+   * routes carry their own requireAuth+requireAdmin internally — see
+   * routes/branding.js.
+   * ========================================================= */
+  app.use('/api', brandingRoutes({ config, userStore, siteSettingsStore, activityLog }));
+  app.use('/api', sessionRoutes({ userStore, failedLoginStore, activityLog, knownLoginStore, mailer, mfaStore, mfaChallengeStore }));
+  app.use('/api', requireAuth);
+  app.use('/api', requireGoodStanding(userStore));
+  app.use('/api', accountRoutes({ config, userStore, passwordPolicyStore, sessionStore, activityLog }));
+  app.use('/api', mfaRoutes({ userStore, mfaStore }));
+  app.use('/api', requireAdmin(userStore), usersRoutes({ userStore, sessionStore, activityLog, mfaStore }));
+  app.use('/api', requireAdmin(userStore), appsRoutes({ appStore, userStore, activityLog }));
+  app.use('/api', requireAdmin(userStore), activityRoutes({ activityLog, failedLoginStore }));
+  app.use('/api', requireAdmin(userStore), passwordPolicyRoutes({ passwordPolicyStore, activityLog }));
+  app.use('/api', requireAdmin(userStore), emailRoutes({ emailSettingsStore, mailer, userStore, activityLog }));
+
+  app.use('/avatars', express.static(config.avatars.directory));
+  app.use('/branding', express.static(`${config.avatars.directory}/../branding`));
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+
+  // Defense in depth alongside the process-level handlers below: catches
+  // a thrown/forwarded error from any route that doesn't already
+  // try/catch its own (most do), so it becomes one failed request
+  // instead of an unstyled Express default error page.
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, req, res, next) => {
+    console.error('Unhandled request error:', err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Internal server error' });
+  });
+
+  app.listen(config.server.port, config.server.bind, () => {
+    console.log(`Passport Consumer listening on http://${config.server.bind}:${config.server.port}`);
+  });
+}
+
+// A single malformed request (e.g. a header that fails a DB type cast
+// before any route-level try/catch runs) used to crash the ENTIRE
+// server via an unhandled promise rejection — no auth required, taking
+// down every user's session at once. Node's default for both of these
+// is to terminate the process; logging and continuing instead is what
+// actually makes one bad request "one failed request" rather than an
+// outage. This is a backstop, not a substitute for fixing the
+// underlying bug where one's found (see utils/uuid.js).
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled promise rejection:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+
+main().catch((err) => {
+  console.error('Failed to start Passport Consumer:', err);
+  process.exit(1);
+});

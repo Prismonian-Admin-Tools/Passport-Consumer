@@ -1,0 +1,2016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Passport Consumer</title>
+<style>
+  :root {
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --radius: 10px;
+  }
+  /* ---- ember theme, matched to the real Interstellar Console UI —
+     colors sampled directly from screenshots, not guessed. Console's
+     own look leans on the accent color + spacing for definition rather
+     than high-contrast borders (its real border-vs-surface ratio is
+     only ~1.3:1), so this intentionally follows that over abstract
+     contrast targets. ---- */
+  [data-theme="ember"] {
+    --bg: #0b0e11; --bg-alt: #12161b; --surface: #12161b; --surface-2: #181d24;
+    --border: #252b34; --border-soft: #1c212a;
+    --text: #e8e6e1; --text-dim: #818996; --text-faint: #4f5561;
+    --accent: #ff8a3d; --accent-dim: #d8701f; --accent-glow: rgba(255,138,61,0.20);
+    --green: #45bf9f; --red: #e2585f; --yellow: #e0b84c; --blue: #5b9dd9;
+  }
+  [data-theme="ocean"] {
+    --bg: #070f18; --bg-alt: #0f1c2c; --surface: #142438; --surface-2: #1a2d44;
+    --border: #5a8abd; --border-soft: #35547d;
+    --text: #f1f7fd; --text-dim: #b7c9dd; --text-faint: #7e93ac;
+    --accent: #5fc4f5; --accent-dim: #43a2cc; --accent-glow: rgba(95,196,245,0.22);
+    --green: #7fdcb8; --red: #f07871; --yellow: #eec35c; --blue: #83b8e6;
+  }
+  [data-theme="forest"] {
+    --bg: #0a1209; --bg-alt: #13200f; --surface: #182818; --surface-2: #203420;
+    --border: #63925d; --border-soft: #3d5c3a;
+    --text: #f3f9f0; --text-dim: #bcd4bb; --text-faint: #839a80;
+    --accent: #7fe08b; --accent-dim: #5fbf6b; --accent-glow: rgba(127,224,139,0.22);
+    --green: #8ed68e; --red: #f07871; --yellow: #eec35c; --blue: #83b8e6;
+  }
+  [data-theme="light"] {
+    --bg: #eeebe4; --bg-alt: #ffffff; --surface: #ffffff; --surface-2: #f2ede4;
+    --border: #9d8e73; --border-soft: #c9bfae;
+    --text: #16110c; --text-dim: #4c443a; --text-faint: #756a5c;
+    --accent: #d4661f; --accent-dim: #b4551a; --accent-glow: rgba(212,102,31,0.16);
+    --green: #327140; --red: #b33a32; --yellow: #93690a; --blue: #285d87;
+  }
+  [data-theme="purple"] {
+    --bg: #120a1c; --bg-alt: #1c1030; --surface: #1c1030; --surface-2: #241541;
+    --border: #7a5aad; --border-soft: #4a3570;
+    --text: #f3eefc; --text-dim: #c3b0dd; --text-faint: #8a76ab;
+    --accent: #b478f0; --accent-dim: #9355d1; --accent-glow: rgba(180,120,240,0.22);
+    --green: #7fdcb8; --red: #f07871; --yellow: #eec35c; --blue: #83b8e6;
+  }
+  /* ---- the "sharp" family: pure black/white, maximum border-vs-surface
+     contrast — the opposite end of the spectrum from ember's low-contrast
+     look above, for anyone who wants edges over ambience. blueSharp is
+     the app default (bound to bare `html` below) — more recognizable at
+     a glance than ember was. ---- */
+  html, [data-theme="blueSharp"] {
+    --bg: #000000; --bg-alt: #0a0a0a; --surface: #000000; --surface-2: #111111;
+    --border: #ffffff; --border-soft: #666666;
+    --text: #ffffff; --text-dim: #cccccc; --text-faint: #999999;
+    --accent: #00e5ff; --accent-dim: #00b8cc; --accent-glow: rgba(0,229,255,0.25);
+    --green: #00ff85; --red: #ff3b3b; --yellow: #ffe135; --blue: #00e5ff;
+  }
+  [data-theme="purpleSharp"] {
+    --bg: #000000; --bg-alt: #0a0a0a; --surface: #000000; --surface-2: #111111;
+    --border: #ffffff; --border-soft: #666666;
+    --text: #ffffff; --text-dim: #cccccc; --text-faint: #999999;
+    --accent: #b45cff; --accent-dim: #8e3fd1; --accent-glow: rgba(180,92,255,0.25);
+    --green: #00ff85; --red: #ff3b3b; --yellow: #ffe135; --blue: #b45cff;
+  }
+
+  * { box-sizing: border-box; }
+  /* Belt-and-suspenders: the min-width:0 fixes above stop the layout from
+     forcing this in the first place, but nothing should ever be able to
+     make the whole PAGE scroll sideways again — a wrapper that actually
+     wants horizontal scroll (.table-scroll) declares that itself. */
+  html, body { overflow-x: hidden; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); transition: background .2s, color .2s; }
+  /* A toned-down echo of the login screen's own glow (.center-screen::before
+     below, opacity .8) behind the signed-in app too. Deliberately non-negative
+     z-index, same as .center-screen/.card below — a fixed+negative-z-index
+     layer with no positioned ancestor can fail to composite at all on weak/
+     blocklisted GPUs (it never paints, though it's fine on a capable GPU), so
+     #app gets its own stacking context above this instead of pushing the glow
+     below zero. Only actually shows through where a child has no opaque
+     background of its own (section.content is transparent; header/nav aren't,
+     so they stay fully legible). */
+  body::before {
+    content: ''; position: fixed; inset: -10%; z-index: 0; pointer-events: none;
+    background: radial-gradient(circle at 25% 15%, var(--accent-glow), transparent 50%),
+                radial-gradient(circle at 85% 85%, var(--accent-glow), transparent 45%);
+    opacity: .2;
+  }
+  #app { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+  a { color: var(--accent); }
+  ::selection { background: var(--accent-glow); }
+
+  /* ---- scrollbars, everywhere (documents and any overflow:auto panel) ---- */
+  * { scrollbar-width: thin; scrollbar-color: var(--border) var(--bg-alt); }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: var(--bg-alt); }
+  ::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 20px; border: 2px solid var(--bg-alt); }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--accent-dim); }
+  ::-webkit-scrollbar-corner { background: var(--bg-alt); }
+
+  /* ---- brand mark ---- */
+  .brandmark { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: 0.01em; font-size: 16px; }
+  .brandmark .logo { width: 26px; height: 26px; flex-shrink: 0; }
+  .brandmark .dot { fill: var(--accent); }
+  .brandmark .ring { stroke: var(--text-dim); }
+  .brandmark .word span { color: var(--accent); }
+
+  /* ---- login ---- */
+  .center-screen { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; overflow: hidden; }
+  .center-screen::before {
+    content: ''; position: absolute; inset: -20%; z-index: 0; pointer-events: none;
+    background: radial-gradient(circle at 30% 20%, var(--accent-glow), transparent 55%),
+                radial-gradient(circle at 80% 80%, var(--accent-glow), transparent 45%);
+    opacity: .8;
+  }
+  .card { position: relative; z-index: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 34px; width: 100%; max-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+  .card .brandmark { justify-content: center; margin-bottom: 6px; font-size: 20px; }
+  .card .sub { color: var(--text-dim); font-size: 13px; margin-bottom: 22px; text-align: center; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin: 14px 0 6px; letter-spacing: .01em; }
+  input, select, textarea { width: 100%; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 10px 11px; font-size: 14px; font-family: var(--sans); }
+  /* Checkboxes/radios have a fixed native size — the width:100% above
+     (meant for text/select/textarea fields) was stretching them across
+     the whole row instead, shoving their label text far off to the
+     right. Any checkbox not already inside a .checkline wrapper hit
+     this. */
+  input[type="checkbox"], input[type="radio"] { width: auto; padding: 0; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 3px var(--accent-glow); }
+  button { cursor: pointer; border: none; border-radius: 7px; padding: 9px 15px; font-size: 13px; font-weight: 600; font-family: var(--sans); transition: transform .08s, background .15s, border-color .15s, color .15s; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button:disabled:active { transform: none; }
+  button:active { transform: scale(0.97); }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-dim)); color: #1a1008; }
+  [data-theme="light"] .btn-primary { color: #fff; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text-faint); }
+  .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--red); opacity: .85; }
+  .btn-danger:hover { opacity: 1; background: rgba(229,103,95,0.08); }
+  .btn-block { width: 100%; margin-top: 20px; padding: 11px; font-size: 14px; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .err { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 16px; }
+  .hint { color: var(--text-faint); font-size: 12px; margin-top: 4px; line-height: 1.5; }
+
+  /* ---- shell ---- */
+  header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 14px 24px; border-bottom: 1px solid var(--border-soft); background: var(--bg-alt); }
+  header .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim); }
+  .avatar-chip { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: var(--accent); flex-shrink: 0; }
+  /* Colored via inline style from roleBadgeStyle() below — just two
+     colors now (admin/user), rather than a per-rank custom color. */
+  .role-pill { font-size: 10px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+
+  /* min-width: 0 overrides a flex item's default min-width:auto — without
+     it, a flex child never shrinks below its content's natural width, so
+     one wide thing inside `content` (a table wanting to be 540px+, say)
+     pushes `content` itself wider than the space `nav` actually left it,
+     and the whole page ends up scrolling sideways instead of just that
+     one thing. */
+  main { flex: 1; display: flex; min-width: 0; }
+  nav { width: 208px; border-right: 1px solid var(--border-soft); padding: 18px 12px; background: var(--bg-alt); }
+  nav .navlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-faint); padding: 4px 12px 8px; }
+  nav button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; color: var(--text-dim); padding: 9px 12px; border-radius: 8px; font-weight: 600; margin-bottom: 2px; font-size: 13px; }
+  nav button svg { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
+  nav button:hover { background: var(--surface-2); color: var(--text); }
+  nav button.active { background: var(--accent-glow); color: var(--accent); }
+  nav button.active svg { opacity: 1; }
+  section.content { flex: 1; min-width: 0; padding: 30px 34px; max-width: 920px; animation: fadein .18s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  /* Triggered on a login/MFA card via shakeEl() on a failed attempt. */
+  @keyframes shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+  .shake { animation: shake .4s cubic-bezier(.36,.07,.19,.97) both; }
+  h2 { font-size: 19px; margin: 0 0 4px; display: flex; align-items: center; gap: 9px; }
+  .pagesub { color: var(--text-faint); font-size: 13px; margin-bottom: 22px; }
+
+  /* ---- stat cards ---- */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 26px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .stat-card .num { font-size: 26px; font-weight: 800; color: var(--accent); line-height: 1.1; overflow-wrap: anywhere; }
+  .stat-card .num.long-text { font-size: 18px; }
+  .stat-card .label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 18px; }
+  .panel h3 { margin: 0 0 14px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .panel h3 svg, .modal h3 svg { width: 15px; height: 15px; color: var(--accent); flex-shrink: 0; }
+
+  /* Every table gets wrapped in this (see tableWrap() below) so a row too
+     wide for a phone screen scrolls WITHIN the table instead of pushing
+     the whole page sideways. */
+  .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-scroll table { min-width: 540px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+  /* An empty cell (a row with no Manage button, say) has zero content, so
+     height: auto collapses it below its siblings on the same row —
+     min-height doesn't help here, table cells don't reliably honor it
+     when truly empty. A non-breaking space gives the cell a real line
+     box the same height as any other row's text. */
+  .row-actions:empty::after { content: "\00a0"; line-height: 27px; } /* ~= a .btn-sm's rendered height, so an actions-less row matches its siblings */
+  th { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface-2); }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); color: var(--text-dim); display: inline-block; }
+  .badge.disabled { color: var(--red); border-color: var(--red); }
+  .badge.ok { color: var(--green); border-color: var(--green); }
+  .badge.warn { color: var(--yellow); border-color: var(--yellow); }
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  /* The buttons column itself used to scroll away with the rest of a wide
+     row inside .table-scroll — reachable, but only after scrolling every
+     other column out of view first, which on a phone-width table meant
+     the Edit/Delete/etc. buttons were effectively hidden. Pins it to the
+     right edge of the scroll box instead, both header and body cells (see
+     tableHeaders() — the trailing '' header gets this class too so the
+     two stay lined up), with its own background so scrolled-under
+     columns don't show through, and a border to mark the seam. */
+  .table-scroll .row-actions { position: sticky; right: 0; z-index: 1; background: var(--surface); border-left: 1px solid var(--border-soft); }
+  .table-scroll tr:hover td.row-actions { background: var(--surface-2); }
+  .name-cell { display: flex; align-items: center; gap: 10px; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; }
+  .toolbar input[type=text] { max-width: 220px; }
+
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 50; animation: fadein .12s ease; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; width: 440px; max-width: 92vw; max-height: 86vh; overflow-y: auto; }
+  .modal h3 { margin: 0 0 16px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .modal-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 20px; }
+  .modal-actions .right { display: flex; gap: 8px; margin-left: auto; }
+  .secret-box { font-family: var(--mono); background: var(--bg-alt); border: 1px solid var(--border); padding: 10px; border-radius: 7px; font-size: 12px; word-break: break-all; margin-top: 8px; color: var(--green); }
+  .muted { color: var(--text-faint); font-size: 12px; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface); border: 1px solid var(--border); padding: 12px 16px; border-radius: 9px; font-size: 13px; z-index: 60; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: fadein .15s ease; }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .toast.ok { border-color: var(--green); color: var(--green); }
+  .checkline { display: flex; align-items: center; gap: 9px; margin: 12px 0; font-size: 13px; }
+  .checkline input { width: auto; }
+  .divider { height: 1px; background: var(--border-soft); margin: 20px 0; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* ---- account page specific ---- */
+  .avatar-big-wrap { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }
+  .avatar-big { width: 74px; height: 74px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; color: var(--accent); cursor: pointer; position: relative; flex-shrink: 0; }
+  .avatar-big:hover::after { content: 'Change'; position: absolute; inset: 0; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .theme-swatches { display: flex; gap: 10px; margin-top: 6px; }
+  .swatch { width: 40px; height: 40px; border-radius: 9px; cursor: pointer; border: 2px solid transparent; position: relative; }
+  .swatch.selected { border-color: var(--accent); }
+  .swatch.ember { background: linear-gradient(135deg, #ff8a3d, #0b0e11); }
+  .swatch.ocean { background: linear-gradient(135deg, #5fc4f5, #070f18); }
+  .swatch.forest { background: linear-gradient(135deg, #7fe08b, #0a1209); }
+  .swatch.light { background: linear-gradient(135deg, #d4661f, #eeebe4); }
+  .swatch.purple { background: linear-gradient(135deg, #b478f0, #120a1c); }
+  .swatch.blueSharp { background: linear-gradient(135deg, #00e5ff, #000000); }
+  .swatch.purpleSharp { background: linear-gradient(135deg, #b45cff, #000000); }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 13px; }
+  .detail-grid .k { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+  .detail-grid .v { color: var(--text); font-family: var(--mono); font-size: 12px; word-break: break-all; }
+
+  /* ---- bulk toolbar / selection ---- */
+  .bulk-bar { display: flex; align-items: center; gap: 10px; background: var(--accent-glow); border: 1px solid var(--accent-dim); border-radius: 8px; padding: 9px 14px; margin-bottom: 12px; font-size: 13px; }
+  .bulk-bar .count { font-weight: 700; color: var(--accent); }
+  .bulk-bar .spacer { flex: 1; }
+  th.checkcol, td.checkcol { width: 30px; }
+
+  /* ---- sessions list ---- */
+  .session-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .session-row:last-child { border-bottom: none; }
+  .session-row .info .app { font-weight: 700; }
+  .session-row .info .meta { color: var(--text-faint); font-size: 11.5px; margin-top: 2px; }
+  .empty-note { color: var(--text-faint); font-size: 13px; padding: 10px 0; }
+
+  /* ---- filter bar ---- */
+  .filter-bar { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar .fgroup { display: flex; flex-direction: column; gap: 4px; }
+  .filter-bar .fgroup label { margin: 0; }
+  .filter-bar input, .filter-bar select { padding: 8px 10px; font-size: 13px; width: auto; }
+
+  /* ---- logo / import dropzone ---- */
+  .logo-preview { width: 56px; height: 56px; border-radius: 10px; object-fit: contain; background: var(--bg-alt); border: 1px solid var(--border); padding: 6px; }
+  .csv-drop { border: 2px dashed var(--border); border-radius: 9px; padding: 22px; text-align: center; cursor: pointer; color: var(--text-dim); font-size: 13px; }
+  .csv-drop:hover { border-color: var(--accent-dim); color: var(--text); }
+  .import-results-table { max-height: 240px; overflow-y: auto; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+
+const ICONS = {
+  dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  account: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.5-4 5-6 7.5-6s6 2 7.5 6"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M2.5 19c1-3.3 3.8-5 6.5-5s5.5 1.7 6.5 5"/><circle cx="17" cy="7" r="2.3"/><path d="M15.5 12.3c2 .2 3.8 1.8 4.5 4.2"/></svg>',
+  apps: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>',
+  activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>',
+  key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 5l3 3M13 8l2 2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.9 7.9 0 000-2l2-1.5-2-3.5-2.4.5a8 8 0 00-1.7-1L15 3h-6l-.3 2.5a8 8 0 00-1.7 1l-2.4-.5-2 3.5L4.6 11a7.9 7.9 0 000 2l-2 1.5 2 3.5 2.4-.5a8 8 0 001.7 1L9 21h6l.3-2.5a8 8 0 001.7-1l2.4.5 2-3.5-2-1.5z"/></svg>',
+  email: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  policy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
+  monitor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>',
+};
+
+const state = { profile: null, view: 'dashboard', branding: { siteName: 'Passport Consumer', logoExt: null } };
+
+async function api(path, opts = {}) {
+  const isForm = opts.body instanceof FormData;
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: (opts.body && !isForm) ? { 'Content-Type': 'application/json' } : {},
+    body: opts.body ? (isForm ? opts.body : JSON.stringify(opts.body)) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
+  return data;
+}
+
+const THEMES = ['ember', 'ocean', 'forest', 'light', 'purple', 'blueSharp', 'purpleSharp'];
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme && THEMES.includes(theme) ? theme : 'blueSharp');
+}
+
+/** A plain 'user' has nothing to see on Dashboard beyond their own basics — land them on My Account instead. Only applied at login/boot, never overrides a manual tab click. */
+function isPlainUser(profile) {
+  return !(profile && profile.isAdmin);
+}
+
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (v === null || v === undefined) return;
+    if (k === 'text') node.textContent = v;
+    else if (k === 'html') node.innerHTML = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  });
+  (children || []).forEach((c) => c && node.appendChild(c));
+  return node;
+}
+
+function icon(name) { return el('span', { html: ICONS[name] || '' }); }
+
+/** Wrap any <table> in this before inserting it — see the .table-scroll CSS rule for why. */
+function tableWrap(table) { return el('div', { class: 'table-scroll' }, [table]); }
+
+/**
+ * Build a table's header row from plain label strings, same as every
+ * table already did inline — except the trailing '' every actions-column
+ * table uses for its buttons header now gets tagged 'row-actions' too, so
+ * the sticky-column CSS (.table-scroll .row-actions) can keep that header
+ * cell glued to the same spot as the row-actions <td>s under it while the
+ * table scrolls horizontally, instead of the two drifting apart.
+ */
+function tableHeaders(labels) {
+  return labels.map((h) => el('th', { text: h, class: h === '' ? 'row-actions' : null }));
+}
+
+/**
+ * Restarts the .shake CSS animation on `elm` (a failed login/MFA card).
+ * Just re-adding an already-present class doesn't restart a running or
+ * just-finished CSS animation, so this drops the class, forces a reflow,
+ * then re-adds it.
+ */
+function shakeEl(elm) {
+  elm.classList.remove('shake');
+  void elm.offsetWidth;
+  elm.classList.add('shake');
+}
+
+/**
+ * A secret copied to the OS clipboard sits there until something else
+ * overwrites it — on a shared or unattended machine that's an open window
+ * for anyone with clipboard access. Best-effort: readText() needs a
+ * permission a browser may not grant, so a failure there just means no
+ * auto-clear, not a broken copy.
+ */
+const CLIPBOARD_AUTOCLEAR_MS = 45000;
+function copyWithAutoClear(text, label) {
+  if (!navigator.clipboard) return;
+  navigator.clipboard.writeText(text).then(() => {
+    toast(label || 'Copied', 'ok');
+    setTimeout(() => {
+      navigator.clipboard.readText().then((current) => {
+        if (current === text) return navigator.clipboard.writeText('');
+      }).catch(() => {});
+    }, CLIPBOARD_AUTOCLEAR_MS);
+  }).catch(() => {});
+}
+
+function initials(name) {
+  return (name || '?').trim().charAt(0).toUpperCase();
+}
+
+function avatarNode(user, size) {
+  const cls = size === 'big' ? 'avatar-big' : 'avatar-chip';
+  if (user && user.avatarExt) {
+    return el('img', { class: cls, src: `/avatars/${user.uid}.${user.avatarExt}?v=${Date.now()}`, alt: '' });
+  }
+  return el('div', { class: cls, text: initials(user ? user.username : '?') });
+}
+
+function brandmark() {
+  if (state.branding.logoExt) {
+    return el('div', { class: 'brandmark' }, [
+      el('img', { class: 'logo', src: `/branding/logo.${state.branding.logoExt}?v=${state.brandingV || 0}`, alt: '' }),
+      el('span', { class: 'word', text: state.branding.siteName }),
+    ]);
+  }
+  // A passport booklet outline with a simple portrait-and-shoulders emblem
+  // in the middle — inline so it recolors with the active theme via the
+  // same CSS vars every other icon uses, no image asset needed.
+  const logo = `<svg class="logo" viewBox="0 0 26 26" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="2" width="18" height="22" rx="2.5" fill="none" stroke="var(--text-dim)" stroke-width="1.6" opacity=".55"/>
+    <circle cx="13" cy="10.3" r="3.2" fill="var(--accent)" opacity=".9"/>
+    <path d="M8.3 18.6c1.15-1.7 2.8-2.5 4.7-2.5s3.55.8 4.7 2.5" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" opacity=".85"/>
+  </svg>`;
+  const name = state.branding.siteName || 'Passport Consumer';
+  const wordHtml = name === 'Passport Consumer'
+    ? 'Passport <span>Consumer</span>'
+    : name.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  return el('div', { class: 'brandmark', html: `${logo}<span class="word">${wordHtml}</span>` });
+}
+
+/**
+ * /oidc/authorize sends a signed-out (or must-change-password) browser
+ * here with ?continue=<the original authorize URL> once Passport
+ * Consumer's own login is out of the way. This is a real page navigation,
+ * not a client-side route change, so the server-side OIDC route runs
+ * again — now authenticated — and finishes redirecting to the client app.
+ */
+function continueIfNeeded() {
+  const params = new URLSearchParams(location.search);
+  const dest = params.get('continue');
+  if (dest && dest.startsWith('/')) { window.location.href = dest; return true; }
+  return false;
+}
+
+/* ---------------- boot ---------------- */
+async function boot() {
+  applyTheme('blueSharp');
+  try {
+    state.branding = await api('/branding');
+  } catch (e) { /* fall back to default Passport Consumer branding */ }
+  document.title = state.branding.siteName || 'Passport Consumer';
+  try {
+    const { profile, requirePasswordChange } = await api('/session');
+    state.profile = profile;
+    applyTheme(profile.theme);
+    if (requirePasswordChange) return renderForceChange();
+    if (continueIfNeeded()) return;
+    if (isPlainUser(profile)) state.view = 'account';
+    render();
+  } catch (e) {
+    renderLogin();
+  }
+}
+
+/* ---------------- login ---------------- */
+
+/** Shared by renderLogin's submit and renderMfaChallenge's — whichever one actually finishes a login lands here. */
+function handleLoginResult(data) {
+  state.profile = data.profile;
+  applyTheme(data.profile.theme);
+  if (data.requirePasswordChange) return renderForceChange();
+  if (continueIfNeeded()) return;
+  if (isPlainUser(data.profile)) state.view = 'account';
+  render();
+}
+
+function renderLogin() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const errEl = el('div', { class: 'err' });
+  const username = el('input', { type: 'text', autocomplete: 'username', placeholder: 'yourname' });
+  const password = el('input', { type: 'password', autocomplete: 'current-password', placeholder: '••••••••' });
+
+  async function submit() {
+    errEl.textContent = '';
+    try {
+      const data = await api('/session/login', {
+        method: 'POST', body: { username: username.value, password: password.value },
+      });
+      if (data.mfaRequired) return renderMfaChallenge(data.mfaTicket);
+      handleLoginResult(data);
+    } catch (e) { errEl.textContent = e.message; shakeEl(form); }
+  }
+
+  const form = el('div', { class: 'card' }, [
+    brandmark(),
+    el('div', { class: 'sub', text: 'Identity & access management' }),
+    el('label', { text: 'Username' }), username,
+    el('label', { text: 'Password' }), password,
+    errEl,
+    el('button', { class: 'btn-primary btn-block', text: 'Sign in', onclick: submit }),
+  ]);
+  password.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  app.appendChild(el('div', { class: 'center-screen' }, [form]));
+  username.focus();
+}
+
+/* ---------------- MFA challenge (second step of login) ---------------- */
+function renderMfaChallenge(mfaTicket) {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const errEl = el('div', { class: 'err' });
+  const token = el('input', { type: 'text', placeholder: '6-digit code', maxlength: '10', inputmode: 'numeric', autocomplete: 'one-time-code' });
+
+  async function submit() {
+    errEl.textContent = '';
+    try {
+      const data = await api('/session/login/mfa', { method: 'POST', body: { mfaTicket, token: token.value } });
+      handleLoginResult(data);
+    } catch (e) { errEl.textContent = e.message; shakeEl(form); }
+  }
+
+  const form = el('div', { class: 'card' }, [
+    brandmark(),
+    el('div', { class: 'sub', text: 'Enter the 6-digit code from your authenticator app, or one of your backup codes.' }),
+    el('label', { text: 'Code' }), token,
+    errEl,
+    el('button', { class: 'btn-primary btn-block', text: 'Verify', onclick: submit }),
+  ]);
+  token.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  app.appendChild(el('div', { class: 'center-screen' }, [form]));
+  token.focus();
+}
+
+/* ---------------- forced password change ---------------- */
+function renderForceChange() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const errEl = el('div', { class: 'err' });
+  const pw1 = el('input', { type: 'password', placeholder: 'At least 8 characters' });
+  const pw2 = el('input', { type: 'password', placeholder: 'Repeat it' });
+
+  async function submit() {
+    errEl.textContent = '';
+    try {
+      await api('/account/password', { method: 'PUT', body: { newPassword: pw1.value, confirmPassword: pw2.value } });
+      toast('Password updated', 'ok');
+      // account/password's own response is a bare profile — re-fetch via
+      // /session for isAdmin, which only that endpoint adds, so the tab
+      // list and the plain-user default below see the real thing instead
+      // of an empty object.
+      const { profile } = await api('/session');
+      state.profile = profile;
+      if (continueIfNeeded()) return;
+      if (isPlainUser(profile)) state.view = 'account';
+      render();
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  const form = el('div', { class: 'card' }, [
+    brandmark(),
+    el('div', { class: 'sub', text: 'This account requires a new password before continuing.' }),
+    el('label', { text: 'New password' }), pw1,
+    el('label', { text: 'Confirm new password' }), pw2,
+    errEl,
+    el('button', { class: 'btn-primary btn-block', text: 'Update password', onclick: submit }),
+  ]);
+  app.appendChild(el('div', { class: 'center-screen' }, [form]));
+}
+
+/* ---------------- automatic logoff ---------------- */
+// Signs the session out after sitting idle for 5 minutes.
+const AUTO_LOGOFF_IDLE_MS = 5 * 60 * 1000;
+const AUTO_LOGOFF_HEARTBEAT_MS = 15 * 1000;
+const AUTO_LOGOFF_ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'];
+let autoLogoff = null; // { timer, lastActivityAt } while signed in, else null
+
+function markAutoLogoffActivity() {
+  if (autoLogoff) autoLogoff.lastActivityAt = Date.now();
+}
+
+async function triggerAutoLogoff(message) {
+  stopAutoLogoff();
+  try { await api('/session/logout', { method: 'POST' }); } catch (e) { /* best effort — we're leaving the app either way */ }
+  state.profile = null;
+  renderLogin();
+  toast(message, 'ok');
+}
+
+function startAutoLogoff() {
+  if (autoLogoff) return;
+  const now = Date.now();
+  autoLogoff = { lastActivityAt: now, timer: null };
+  AUTO_LOGOFF_ACTIVITY_EVENTS.forEach((evt) => window.addEventListener(evt, markAutoLogoffActivity, { passive: true }));
+  autoLogoff.timer = setInterval(() => {
+    const tick = Date.now();
+    if (tick - autoLogoff.lastActivityAt >= AUTO_LOGOFF_IDLE_MS) {
+      triggerAutoLogoff('Signed out automatically after 5 minutes of inactivity.');
+    }
+  }, AUTO_LOGOFF_HEARTBEAT_MS);
+}
+
+function stopAutoLogoff() {
+  if (!autoLogoff) return;
+  clearInterval(autoLogoff.timer);
+  AUTO_LOGOFF_ACTIVITY_EVENTS.forEach((evt) => window.removeEventListener(evt, markAutoLogoffActivity));
+  autoLogoff = null;
+}
+
+/* ---------------- shell ---------------- */
+function render() {
+  startAutoLogoff();
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+
+  // 'admin' gets every management tab; 'user' gets none — a flat two-tier
+  // role replaces the source project's per-capability rank system, so
+  // there's a single boolean gate here instead of one check per tab.
+  const isAdmin = !!state.profile.isAdmin;
+  const tabs = [['dashboard', 'Dashboard', 'dashboard'], ['account', 'My Account', 'account']];
+  if (isAdmin) {
+    tabs.push(
+      ['users', 'Users', 'users'],
+      ['apps', 'Apps', 'apps'],
+      ['activity', 'Activity', 'activity'],
+      ['passwordPolicy', 'Password Policy', 'policy'],
+      ['email', 'Email', 'email'],
+      ['settings', 'Settings', 'settings'],
+    );
+  }
+
+  const navEl = el('nav', {}, [
+    el('div', { class: 'navlabel', text: 'Navigate' }),
+    ...tabs.map(([id, label, ic]) =>
+      el('button', {
+        class: state.view === id ? 'active' : '',
+        onclick: () => { state.view = id; render(); },
+      }, [icon(ic), el('span', { text: label })])
+    ),
+  ]);
+
+  const header = el('header', {}, [
+    brandmark(),
+    el('div', { class: 'who' }, [
+      el('span', { class: 'role-pill', style: roleBadgeStyle(state.profile.role), text: state.profile.role }),
+      avatarNode(state.profile, 'small'),
+      el('span', { text: state.profile.username }),
+      el('button', { class: 'btn-ghost btn-sm', text: 'Sign out', onclick: logout }),
+    ]),
+  ]);
+
+  const content = el('section', { class: 'content', id: 'content' });
+  app.appendChild(el('div', { style: 'display:flex;flex-direction:column;min-height:100vh' }, [header, el('main', {}, [navEl, content])]));
+
+  if (state.view === 'dashboard') renderDashboard(content);
+  if (state.view === 'account') renderAccount(content);
+  if (state.view === 'users') renderUsers(content);
+  if (state.view === 'apps') renderApps(content);
+  if (state.view === 'activity') renderActivity(content);
+  if (state.view === 'passwordPolicy') renderPasswordPolicy(content);
+  if (state.view === 'email') renderEmailSettings(content);
+  if (state.view === 'settings') renderSettings(content);
+}
+
+async function logout() {
+  stopAutoLogoff();
+  await api('/session/logout', { method: 'POST' });
+  state.profile = null;
+  renderLogin();
+}
+
+/* ---------------- dashboard ---------------- */
+async function renderDashboard(content) {
+  content.innerHTML = '';
+
+  const cards = [
+    el('div', { class: 'stat-card' }, [
+      el('div', { class: 'num' + (state.profile.role.length > 10 ? ' long-text' : ''), text: state.profile.role }),
+      el('div', { class: 'label', text: 'Your role' }),
+    ]),
+    el('div', { class: 'stat-card' }, [
+      el('div', { class: 'num', text: state.profile.mustChangePassword ? 'Pending' : 'Good' }),
+      el('div', { class: 'label', text: 'Password status' }),
+    ]),
+  ];
+
+  const wrap = el('div', {}, [
+    el('h2', {}, [icon('dashboard'), el('span', { text: 'Dashboard' })]),
+    el('div', { class: 'pagesub', text: `Welcome back, ${state.profile.fullName || state.profile.username}.` }),
+  ]);
+  content.appendChild(wrap);
+
+  if (state.profile.isAdmin) {
+    try {
+      const [users, apps, activity] = await Promise.all([api('/users'), api('/apps'), api('/activity')]);
+      cards.push(el('div', { class: 'stat-card' }, [el('div', { class: 'num', text: users.length }), el('div', { class: 'label', text: 'Total users' })]));
+      cards.push(el('div', { class: 'stat-card' }, [el('div', { class: 'num', text: apps.length }), el('div', { class: 'label', text: 'Registered apps' })]));
+      const today = new Date().toDateString();
+      const signInsToday = activity.filter((a) => a.category === 'auth' && new Date(a.created_at).toDateString() === today).length;
+      cards.push(el('div', { class: 'stat-card' }, [el('div', { class: 'num', text: signInsToday }), el('div', { class: 'label', text: 'Sign-ins today' })]));
+      content.appendChild(el('div', { class: 'stat-grid' }, cards));
+
+      const feed = el('div', { class: 'panel' }, [
+        el('h3', {}, [icon('activity'), el('span', { text: 'Recent activity' })]),
+        tableWrap(el('table', {}, [
+          el('tbody', {}, activity.slice(0, 8).map((a) => el('tr', {}, [
+            el('td', { style: 'width:120px', text: new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }),
+            el('td', {}, [el('span', { class: 'badge', text: a.category })]),
+            el('td', { text: a.message }),
+          ]))),
+        ])),
+      ]);
+      content.appendChild(feed);
+    } catch (e) { /* non-fatal, just show the basic cards */ content.appendChild(el('div', { class: 'stat-grid' }, cards)); }
+  } else {
+    content.appendChild(el('div', { class: 'stat-grid' }, cards));
+    content.appendChild(el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('key'), el('span', { text: 'Tip' })]),
+      el('div', { class: 'muted', text: 'Head to My Account to update your profile, change your theme, or set a new password.' }),
+    ]));
+  }
+}
+
+/* ---------------- account tab ---------------- */
+async function renderAccount(content) {
+  const profile = await api('/account');
+  content.innerHTML = '';
+
+  const fileInput = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', style: 'display:none' });
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files[0]) return;
+    const fd = new FormData();
+    fd.append('avatar', fileInput.files[0]);
+    try {
+      await api('/account/avatar', { method: 'POST', body: fd });
+      toast('Avatar updated', 'ok');
+      renderAccount(content);
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  const avatarEl = avatarNode(profile, 'big');
+  avatarEl.addEventListener('click', () => fileInput.click());
+
+  const fullName = el('input', { type: 'text', value: profile.fullName || '', placeholder: 'Your name' });
+  const description = el('textarea', { rows: '3', placeholder: 'A short bio or note' }); description.value = profile.description || '';
+
+  async function saveProfile() {
+    try {
+      await api('/account', { method: 'PUT', body: { fullName: fullName.value, description: description.value } });
+      toast('Saved', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  const swatches = THEMES.map((t) => {
+    const sw = el('div', { class: 'swatch ' + t + (profile.theme === t ? ' selected' : '') });
+    sw.addEventListener('click', async () => {
+      applyTheme(t);
+      document.querySelectorAll('.swatch').forEach((s) => s.classList.remove('selected'));
+      sw.classList.add('selected');
+      try { await api('/account', { method: 'PUT', body: { theme: t } }); toast('Theme updated', 'ok'); }
+      catch (e) { toast(e.message, 'err'); }
+    });
+    return sw;
+  });
+
+  const cur = el('input', { type: 'password', placeholder: 'Current password' });
+  const npw = el('input', { type: 'password', placeholder: 'New password' });
+  const cpw = el('input', { type: 'password', placeholder: 'Confirm new password' });
+  async function changePw() {
+    try {
+      await api('/account/password', { method: 'PUT', body: { currentPassword: cur.value, newPassword: npw.value, confirmPassword: cpw.value } });
+      toast('Password changed', 'ok');
+      cur.value = npw.value = cpw.value = '';
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('account'), el('span', { text: 'My Account' })]),
+    el('div', { class: 'pagesub', text: 'Your profile, appearance, and login.' }),
+
+    el('div', { class: 'panel' }, [
+      el('div', { class: 'avatar-big-wrap' }, [avatarEl, fileInput, el('div', {}, [
+        el('div', { style: 'font-weight:700;font-size:15px', text: profile.username }),
+        el('div', { class: 'muted', text: 'Click your avatar to change it — PNG, JPEG, or WEBP, up to 2MB.' }),
+      ])]),
+      el('label', { text: 'Full name' }), fullName,
+      el('label', { text: 'Description' }), description,
+      el('button', { class: 'btn-primary', text: 'Save profile', style: 'margin-top:14px', onclick: saveProfile }),
+
+      el('div', { class: 'divider' }),
+      el('label', { text: 'Theme' }),
+      el('div', { class: 'theme-swatches' }, swatches),
+    ]),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('key'), el('span', { text: 'Change password' })]),
+      el('label', { text: 'Current password' }), cur,
+      el('label', { text: 'New password' }), npw,
+      el('label', { text: 'Confirm new password' }), cpw,
+      el('button', { class: 'btn-primary', text: 'Update password', style: 'margin-top:14px', onclick: changePw }),
+    ]),
+
+    el('div', { class: 'panel', id: 'mfa-panel' }, [renderMfaPanelLoading()]),
+
+    el('div', { class: 'panel', id: 'sessions-panel' }, [renderSessionsPanelLoading()]),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('clock'), el('span', { text: 'Account details' })]),
+      el('div', { class: 'detail-grid' }, [
+        el('div', {}, [el('div', { class: 'k', text: 'User ID' }), el('div', { class: 'v', text: profile.uid })]),
+        el('div', {}, [el('div', { class: 'k', text: 'Role' }), el('div', { class: 'v', text: profile.role })]),
+        el('div', {}, [el('div', { class: 'k', text: 'Email verified' }), el('div', { class: 'v', text: profile.emailVerified ? 'Yes' : 'No' })]),
+        el('div', {}, [el('div', { class: 'k', text: 'Member since' }), el('div', { class: 'v', text: new Date(profile.createdAt).toLocaleDateString() })]),
+        el('div', {}, [el('div', { class: 'k', text: 'Last login' }), el('div', { class: 'v', text: profile.lastLogin ? new Date(profile.lastLogin).toLocaleString() : '—' })]),
+      ]),
+    ]),
+  ]));
+
+  loadOwnSessions();
+  loadMfaPanel();
+}
+
+/**
+ * Dormant two-factor auth — a real enrollment flow (QR code, confirm
+ * with a live code, one-time backup codes), but nothing at login checks
+ * this yet unless an app has opted in. See src/models/mfaStore.js.
+ */
+function renderMfaPanelLoading() {
+  return el('div', { class: 'muted', text: 'Loading two-factor status…' });
+}
+
+async function loadMfaPanel() {
+  const panel = document.getElementById('mfa-panel');
+  if (!panel) return;
+  try {
+    const status = await api('/account/mfa');
+    panel.innerHTML = '';
+    panel.appendChild(el('h3', {}, [icon('policy'), el('span', { text: 'Two-factor authentication' })]));
+    panel.appendChild(el('div', { class: 'hint', text: 'Authenticator-app codes for your account. Once enabled, you’ll need a code (or a backup code) every time you sign in.' }));
+
+    if (status.enabled) {
+      panel.appendChild(el('div', { class: 'badge ok', style: 'margin:10px 0;display:inline-block', text: 'Enabled' }));
+      const pwInput = el('input', { type: 'password', placeholder: 'Current password to disable' });
+      const errEl = el('div', { class: 'err' });
+      async function disable() {
+        errEl.textContent = '';
+        try {
+          await api('/account/mfa/disable', { method: 'POST', body: { currentPassword: pwInput.value } });
+          toast('Two-factor disabled', 'ok');
+          loadMfaPanel();
+        } catch (e) { errEl.textContent = e.message; }
+      }
+      panel.appendChild(el('div', {}, [pwInput]));
+      panel.appendChild(el('button', { class: 'btn-danger btn-sm', text: 'Disable', style: 'margin-top:10px', onclick: disable }));
+      panel.appendChild(errEl);
+    } else {
+      panel.appendChild(el('button', { class: 'btn-primary btn-sm', style: 'margin-top:6px', text: 'Set up two-factor', onclick: openMfaSetupModal }));
+    }
+  } catch (e) {
+    panel.innerHTML = '';
+    panel.appendChild(el('div', { class: 'err', text: 'Could not load two-factor status: ' + e.message }));
+  }
+}
+
+function openMfaSetupModal() {
+  const errEl = el('div', { class: 'err' });
+  const img = el('img', { style: 'width:180px;height:180px;display:block;margin:0 auto' });
+  const secretBox = el('div', { class: 'secret-box' });
+  const token = el('input', { type: 'text', placeholder: '6-digit code', maxlength: '6', inputmode: 'numeric' });
+
+  openModal([
+    el('h3', {}, [icon('policy'), el('span', { text: 'Set up two-factor' })]),
+    el('div', { class: 'hint', text: 'Scan this with an authenticator app (Google Authenticator, 1Password, etc.), or enter the code below manually.' }),
+    img,
+    secretBox,
+    el('label', { text: 'Enter the 6-digit code it shows', style: 'margin-top:10px' }), token,
+    errEl,
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Cancel', onclick: closeModal }),
+        el('button', { class: 'btn-primary', text: 'Verify', onclick: confirmSetup }),
+      ]),
+    ]),
+  ]);
+
+  api('/account/mfa/setup', { method: 'POST' }).then(({ secret, qrCodeDataUrl }) => {
+    img.src = qrCodeDataUrl;
+    secretBox.appendChild(el('span', { text: secret }));
+  }).catch((e) => { errEl.textContent = e.message; });
+
+  async function confirmSetup() {
+    errEl.textContent = '';
+    try {
+      const { backupCodes } = await api('/account/mfa/confirm', { method: 'POST', body: { token: token.value } });
+      showMfaBackupCodes(backupCodes);
+    } catch (e) { errEl.textContent = e.message; }
+  }
+}
+
+function showMfaBackupCodes(codes) {
+  function copyAll() { copyWithAutoClear(codes.join('\n')); }
+  openModal([
+    el('h3', {}, [icon('policy'), el('span', { text: 'Two-factor enabled' })]),
+    el('div', { class: 'hint', text: 'Save these backup codes somewhere safe — they won’t be shown again, and each one works once.' }),
+    el('div', { class: 'secret-box', style: 'font-family:var(--mono);white-space:pre-line;line-height:1.8' }, [el('span', { text: codes.join('\n') })]),
+    el('button', { class: 'btn-ghost btn-sm', text: 'Copy all', style: 'margin-top:8px', onclick: copyAll }),
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-primary', text: 'Done', onclick: () => { closeModal(); loadMfaPanel(); } }),
+      ]),
+    ]),
+  ]);
+}
+
+function renderSessionsPanelLoading() {
+  return el('div', { class: 'muted', text: 'Loading active sessions…' });
+}
+
+async function loadOwnSessions() {
+  const panel = document.getElementById('sessions-panel');
+  if (!panel) return;
+  try {
+    const sessions = await api('/account/sessions');
+    if (!document.getElementById('sessions-panel')) return; // navigated away mid-fetch
+    renderSessionsInto(panel, sessions, {
+      onRevoke: async (tokenHash) => {
+        await api('/account/sessions/' + tokenHash, { method: 'DELETE' });
+        toast('Signed out of that session', 'ok');
+        loadOwnSessions();
+      },
+      onRevokeAll: async () => {
+        await api('/account/sessions/revoke-all', { method: 'POST' });
+        toast('Signed out everywhere', 'ok');
+        loadOwnSessions();
+      },
+    }, 'Apps you’re currently signed into via Passport Consumer.');
+  } catch (e) {
+    panel.innerHTML = '';
+    panel.appendChild(el('div', { class: 'err', text: 'Could not load sessions: ' + e.message }));
+  }
+}
+
+function renderSessionsInto(panel, sessions, handlers, subtitle) {
+  panel.innerHTML = '';
+  const rows = sessions.length
+    ? sessions.map((s) => el('div', { class: 'session-row' }, [
+        el('div', { class: 'info' }, [
+          el('div', { class: 'app', text: s.app_name }),
+          el('div', { class: 'meta', text: `Last active ${new Date(s.last_seen_at).toLocaleString()} · expires ${new Date(s.expires_at).toLocaleDateString()}` }),
+        ]),
+        el('button', { class: 'btn-ghost btn-sm', text: 'Sign out', onclick: () => handlers.onRevoke(s.token_hash) }),
+      ]))
+    : [el('div', { class: 'empty-note', text: 'No active sessions in other apps right now.' })];
+
+  panel.appendChild(el('h3', {}, [icon('monitor'), el('span', { text: 'Active sessions' })]));
+  panel.appendChild(el('div', { class: 'muted', text: subtitle || 'Apps currently signed into via Passport Consumer.', style: 'margin-bottom:10px' }));
+  rows.forEach((r) => panel.appendChild(r));
+  if (sessions.length > 1) {
+    panel.appendChild(el('button', { class: 'btn-ghost btn-sm', text: 'Sign out everywhere', style: 'margin-top:12px', onclick: handlers.onRevokeAll }));
+  }
+}
+
+/* ---------------- users tab (admin only) ---------------- */
+const ROLE_LABELS = { admin: 'Admin', user: 'User' };
+function roleLabel(role) { return ROLE_LABELS[role] || role; }
+
+/** The two-color badge every role pill in the app uses — a subtle accent for admin, neutral for user. Replaces the source project's per-rank custom color. */
+function roleBadgeStyle(role) {
+  return role === 'admin'
+    ? 'color:var(--accent);border-color:var(--accent);background:var(--accent-glow)'
+    : 'color:var(--text-dim);border-color:var(--border)';
+}
+
+/** Admins first, ties broken by username — except the signed-in user's own row, which always goes first regardless of role. */
+function sortUsersForManager(users) {
+  return [...users].sort((a, b) => {
+    const aSelf = a.uid === state.profile.uid;
+    const bSelf = b.uid === state.profile.uid;
+    if (aSelf !== bSelf) return aSelf ? -1 : 1;
+    if (a.role !== b.role) return a.role === 'admin' ? -1 : 1;
+    return a.username.localeCompare(b.username);
+  });
+}
+
+/** Whether the signed-in admin can manage (edit/delete/etc) this row — the route itself is admin-only, so the only thing left to rule out is your own account (My Account is the self-service path for that). */
+function canManageUser(u) {
+  return u.uid !== state.profile.uid;
+}
+
+async function renderUsers(content) {
+  const fetched = await api('/users');
+  const users = sortUsersForManager(fetched);
+  content.innerHTML = '';
+
+  const selected = new Set();
+
+  const bulkBar = el('div', { class: 'bulk-bar', style: 'display:none' });
+  function updateBulkBar() {
+    if (!selected.size) { bulkBar.style.display = 'none'; return; }
+    bulkBar.style.display = 'flex';
+    bulkBar.innerHTML = '';
+    bulkBar.appendChild(el('span', {}, [el('span', { class: 'count', text: selected.size }), document.createTextNode(' selected')]));
+    bulkBar.appendChild(el('div', { class: 'spacer' }));
+    bulkBar.appendChild(el('button', { class: 'btn-ghost btn-sm', text: 'Enable', onclick: () => bulkPatch({ disabled: false }) }));
+    bulkBar.appendChild(el('button', { class: 'btn-ghost btn-sm', text: 'Disable', onclick: () => bulkPatch({ disabled: true }) }));
+    bulkBar.appendChild(el('button', { class: 'btn-danger btn-sm', text: 'Delete', onclick: bulkDelete }));
+  }
+
+  async function bulkPatch(body) {
+    try {
+      await Promise.all([...selected].map((uid) => api('/users/' + uid, { method: 'PATCH', body })));
+      toast(`Updated ${selected.size} user${selected.size === 1 ? '' : 's'}`, 'ok');
+      renderUsers(content);
+    } catch (e) { toast(e.message, 'err'); }
+  }
+  async function bulkDelete() {
+    if (!confirm(`Delete ${selected.size} selected user(s)? This cannot be undone.`)) return;
+    try {
+      await Promise.all([...selected].map((uid) => api('/users/' + uid, { method: 'DELETE' })));
+      toast('Deleted', 'ok');
+      renderUsers(content);
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  function makeRow(u) {
+    const row = userRow(u);
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = selected.has(u.uid);
+    if (!canManageUser(u)) cb.disabled = true;
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(u.uid); else selected.delete(u.uid);
+      updateBulkBar();
+    });
+    row.insertBefore(el('td', { class: 'checkcol' }, [cb]), row.firstChild);
+    return row;
+  }
+
+  const search = el('input', { type: 'text', placeholder: 'Search username…' });
+  const tbody = el('tbody', {}, users.map(makeRow));
+  search.addEventListener('input', () => {
+    const q = search.value.toLowerCase();
+    tbody.innerHTML = '';
+    users.filter((u) => u.username.toLowerCase().includes(q)).forEach((u) => tbody.appendChild(makeRow(u)));
+  });
+
+  const table = tableWrap(el('table', {}, [
+    el('thead', {}, [el('tr', {}, [el('th', { class: 'checkcol' }), ...tableHeaders(['User', 'Role', 'Status', ''])])]),
+    tbody,
+  ]));
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('users'), el('span', { text: 'Users' })]),
+    el('div', { class: 'pagesub', text: `${users.length} account${users.length === 1 ? '' : 's'} registered with Passport Consumer.` }),
+    el('div', { class: 'toolbar' }, [
+      search,
+      el('div', { style: 'display:flex;gap:8px' }, [
+        el('button', { class: 'btn-ghost', text: 'Import CSV', onclick: openImportCsvModal }),
+        el('button', { class: 'btn-primary', text: '+ New user', onclick: () => openCreateUserModal() }),
+      ]),
+    ]),
+    bulkBar,
+    table,
+  ]));
+}
+
+function userRow(u) {
+  const isSelf = u.uid === state.profile.uid;
+  const roleBadge = el('span', { class: 'badge', style: roleBadgeStyle(u.role), text: roleLabel(u.role) });
+  const statusBadges = [
+    u.disabled ? el('span', { class: 'badge disabled', text: 'disabled' })
+      : (u.mustChangePassword ? el('span', { class: 'badge warn', text: 'must change pw' }) : el('span', { class: 'badge ok', text: 'active' })),
+  ];
+  // Lets an admin see who hasn't clicked their self-registration
+  // verification link yet (see decision #2 — self-registered accounts
+  // start emailVerified: false). Point them at
+  // POST /api/v1/resend-verification (via the app they registered
+  // through) to send a fresh link — there's no separate admin-facing
+  // resend endpoint, since the app-facing one already covers it.
+  if (!u.emailVerified) statusBadges.push(el('span', { class: 'badge warn', text: 'unverified email', style: 'margin-left:4px' }));
+  // A row this account isn't allowed to touch (itself — see
+  // canManageUser()) gets no Manage button at all, rather than one that
+  // just errors when clicked — the server enforces this either way
+  // (users.js's requireCanManage), this is purely so the UI doesn't
+  // offer an action that can't succeed.
+  const editBtn = canManageUser(u) ? el('button', { class: 'btn-ghost btn-sm', text: 'Manage', onclick: () => openManageUserModal(u) }) : null;
+  return el('tr', {}, [
+    el('td', {}, [el('div', { class: 'name-cell' }, [avatarNode(u, 'small'), el('span', { text: u.username + (isSelf ? ' (you)' : '') })])]),
+    el('td', {}, [roleBadge]),
+    el('td', {}, statusBadges),
+    el('td', { class: 'row-actions' }, [editBtn]),
+  ]);
+}
+
+function openImportCsvModal() {
+  const fileInput = el('input', { type: 'file', accept: '.csv,text/csv', style: 'display:none' });
+  const dropzone = el('div', { class: 'csv-drop' }, [
+    icon('upload'),
+    el('div', { style: 'margin-top:8px', text: 'Click to choose a CSV file' }),
+    el('div', { class: 'hint', text: 'Header row: username,role,fullName,description (role defaults to user, fullName/description optional)' }),
+  ]);
+  dropzone.addEventListener('click', () => fileInput.click());
+  const errEl = el('div', { class: 'err' });
+  const resultsWrap = el('div', { class: 'import-results-table' });
+  let parsedRows = [];
+  let importedCreds = [];
+
+  function parseCsv(text) {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return [];
+    const header = lines[0].split(',').map((h) => h.trim().toLowerCase());
+    return lines.slice(1).map((line) => {
+      const cols = line.split(',').map((c) => c.trim());
+      const row = {};
+      header.forEach((h, i) => { row[h] = cols[i] || ''; });
+      return row;
+    });
+  }
+  function genPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%';
+    let out = '';
+    for (let i = 0; i < 14; i++) out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files[0]) return;
+    const text = await fileInput.files[0].text();
+    parsedRows = parseCsv(text).filter((r) => r.username);
+    resultsWrap.innerHTML = '';
+    resultsWrap.appendChild(tableWrap(el('table', {}, [
+      el('thead', {}, [el('tr', {}, ['Username', 'Role'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, parsedRows.map((r) => el('tr', {}, [
+        el('td', { text: r.username }), el('td', { text: r.role || 'user' }),
+      ]))),
+    ])));
+    importBtn.disabled = false;
+    importBtn.textContent = `Import ${parsedRows.length} user${parsedRows.length === 1 ? '' : 's'}`;
+  });
+
+  async function runImport() {
+    errEl.textContent = '';
+    importedCreds = [];
+    const outcomes = [];
+    for (const row of parsedRows) {
+      const password = genPassword();
+      const role = (row.role === 'admin') ? 'admin' : 'user';
+      try {
+        await api('/users', { method: 'POST', body: { username: row.username, password, role, fullName: row.fullname || row.fullName || '', description: row.description || '' } });
+        importedCreds.push({ username: row.username, password });
+        outcomes.push(`${row.username}: created`);
+      } catch (e) {
+        outcomes.push(`${row.username}: FAILED — ${e.message}`);
+      }
+    }
+    resultsWrap.innerHTML = '';
+    resultsWrap.appendChild(tableWrap(el('table', {}, [
+      el('thead', {}, [el('tr', {}, ['Result'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, outcomes.map((o) => el('tr', {}, [el('td', { text: o })]))),
+    ])));
+    if (importedCreds.length) {
+      downloadBtn.style.display = 'inline-block';
+      toast(`Imported ${importedCreds.length} user${importedCreds.length === 1 ? '' : 's'}`, 'ok');
+    }
+    importBtn.style.display = 'none';
+    renderUsers(document.getElementById('content'));
+  }
+
+  function downloadCreds() {
+    if (!confirm(
+      `This file contains ${importedCreds.length} plaintext temporary password${importedCreds.length === 1 ? '' : 's'}. ` +
+      'Deliver it to each user over a secure channel and delete it afterward — anyone who can read it can sign in as them until they change their password. Continue?'
+    )) return;
+    const csv = 'username,temporary_password\n' + importedCreds.map((c) => `${c.username},${c.password}`).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'passport-consumer-imported-credentials.csv';
+    a.click();
+    // The per-account creation is already audit-logged (see runImport);
+    // this just drops the plaintext copy sitting in page memory once the
+    // one download it's for has happened.
+    importedCreds = [];
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Downloaded — credentials cleared from memory';
+  }
+
+  const importBtn = el('button', { class: 'btn-primary', text: 'Choose a file first', disabled: 'disabled', onclick: runImport });
+  const downloadBtn = el('button', { class: 'btn-ghost', text: 'Download credentials CSV', style: 'display:none', onclick: downloadCreds });
+
+  openModal([
+    el('h3', {}, [icon('upload'), el('span', { text: 'Import users from CSV' })]),
+    dropzone, fileInput,
+    el('div', { class: 'hint', text: 'Every imported account gets a random temporary password and is forced to change it on first login, same as creating one by hand.' }),
+    el('div', { class: 'hint', text: '⚠ Imported credentials are only ever shown once, as a downloadable CSV of plaintext passwords — handle that file like the secret it is.' }),
+    errEl,
+    resultsWrap,
+    el('div', { class: 'modal-actions' }, [
+      downloadBtn,
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Close', onclick: closeModal }),
+        importBtn,
+      ]),
+    ]),
+  ]);
+}
+
+/**
+ * A printable "logon card" — the plaintext temporary password only ever
+ * exists on screen for as long as the admin who set it is looking at it,
+ * so handing the new/reset account holder something to actually read it
+ * from means capturing it into a file the moment it's set. Built as a
+ * small standalone HTML page (its own styling, not this app's) so it
+ * opens and prints cleanly on its own with no dependency on this tab
+ * still being open. Uses the DOM throughout rather than string
+ * interpolation, so a username/password containing HTML-special
+ * characters can't break the generated page.
+ */
+function downloadLogonCard({ username, password, fullName, roleLabel: label }) {
+  const doc = document.implementation.createHTMLDocument('Logon card — ' + username);
+  const style = doc.createElement('style');
+  style.textContent = `
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f2f2f2; margin: 0; padding: 40px 16px; display: flex; justify-content: center; }
+    .card { width: 100%; max-width: 380px; border: 2px solid #1a1a1a; border-radius: 14px; padding: 28px; background: #fff; color: #111; box-sizing: border-box; }
+    .brand { font-weight: 800; font-size: 18px; margin-bottom: 2px; }
+    .sub { color: #666; font-size: 12px; margin-bottom: 20px; }
+    .row { margin-bottom: 14px; }
+    .k { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+    .v { font-size: 17px; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; word-break: break-all; }
+    .note { margin-top: 20px; padding-top: 16px; border-top: 1px dashed #ccc; font-size: 11px; color: #888; line-height: 1.6; }
+    @media print { body { background: #fff; padding: 0; } .card { border-color: #000; } }
+  `;
+  doc.head.appendChild(style);
+
+  function row(label2, value) {
+    const wrap = doc.createElement('div'); wrap.className = 'row';
+    const k = doc.createElement('div'); k.className = 'k'; k.textContent = label2;
+    const v = doc.createElement('div'); v.className = 'v'; v.textContent = value;
+    wrap.append(k, v);
+    return wrap;
+  }
+
+  const card = doc.createElement('div'); card.className = 'card';
+  const brand = doc.createElement('div'); brand.className = 'brand'; brand.textContent = state.branding.siteName || 'Passport Consumer';
+  const sub = doc.createElement('div'); sub.className = 'sub'; sub.textContent = 'Logon card — keep this confidential';
+  card.append(brand, sub);
+  card.appendChild(row('Username', username));
+  if (fullName) card.appendChild(row('Name', fullName));
+  card.appendChild(row('Temporary password', password));
+  card.appendChild(row('Role', label));
+  const note = doc.createElement('div'); note.className = 'note';
+  note.textContent = `Issued by ${state.profile.username} on ${new Date().toLocaleString()}. A new password is required the first time this account signs in. Destroy this card once it has been delivered and the password has been changed.`;
+  card.appendChild(note);
+  doc.body.appendChild(card);
+
+  const html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+  const blob = new Blob([html], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'logon-card-' + username.replace(/[^A-Za-z0-9_.-]+/g, '-') + '.html';
+  a.click();
+}
+
+function openCreateUserModal() {
+  const username = el('input', { type: 'text', placeholder: 'username' });
+  const password = el('input', { type: 'password', placeholder: 'temporary password' });
+  const confirmPw = el('input', { type: 'password', placeholder: 'confirm temporary password' });
+  const fullName = el('input', { type: 'text', placeholder: 'optional' });
+  const email = el('input', { type: 'email', placeholder: 'optional — used for account notifications; marks the account verified immediately' });
+  const role = el('select', {}, ['user', 'admin'].map((r) => el('option', { value: r, text: roleLabel(r), selected: r === 'user' ? 'selected' : null })));
+  const errEl = el('div', { class: 'err' });
+
+  function genPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#%';
+    let out = '';
+    for (let i = 0; i < 14; i++) out += chars[Math.floor(Math.random() * chars.length)];
+    password.value = out;
+    password.type = 'text';
+    confirmPw.value = out;
+    confirmPw.type = 'text';
+  }
+
+  async function submit() {
+    errEl.textContent = '';
+    if (password.value !== confirmPw.value) { errEl.textContent = 'Passwords do not match.'; return; }
+    try {
+      await api('/users', { method: 'POST', body: { username: username.value, password: password.value, role: role.value, fullName: fullName.value, email: email.value } });
+      downloadLogonCard({ username: username.value, password: password.value, fullName: fullName.value, roleLabel: roleLabel(role.value) });
+      closeModal();
+      toast('User created — logon card downloaded', 'ok');
+      renderUsers(document.getElementById('content'));
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  openModal([
+    el('h3', {}, [icon('users'), el('span', { text: 'New user' })]),
+    el('label', { text: 'Username' }), username,
+    el('label', { text: 'Full name (optional)' }), fullName,
+    el('label', { text: 'Email (optional)' }), email,
+    el('label', { text: 'Temporary password' }), el('div', { style: 'display:flex;gap:8px' }, [password, el('button', { class: 'btn-ghost btn-sm', text: 'Generate', onclick: genPassword })]),
+    el('label', { text: 'Confirm temporary password' }), confirmPw,
+    el('div', { class: 'hint', text: 'At least 8 characters. They’ll be forced to change it on first login, no matter what.' }),
+    el('label', { text: 'Role' }), role,
+    errEl,
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Cancel', onclick: closeModal }),
+        el('button', { class: 'btn-primary', text: 'Create', onclick: submit }),
+      ]),
+    ]),
+  ]);
+}
+
+function openManageUserModal(u) {
+  const role = el('select', {}, ['user', 'admin'].map((r) => el('option', { value: r, text: roleLabel(r), selected: r === u.role ? 'selected' : null })));
+  const fullName = el('input', { type: 'text', value: u.fullName || '' });
+  const email = el('input', { type: 'email', value: u.email || '', placeholder: 'used for account notifications' });
+  const description = el('textarea', { rows: '2' }); description.value = u.description || '';
+  const disabled = el('input', { type: 'checkbox' }); disabled.checked = u.disabled;
+
+  const emailVerified = el('input', { type: 'checkbox' }); emailVerified.checked = !!u.emailVerified;
+
+  const mustChange = el('input', { type: 'checkbox' }); mustChange.checked = !!u.mustChangePassword;
+  const cannotChange = el('input', { type: 'checkbox' }); cannotChange.checked = !!u.cannotChangePassword;
+  mustChange.addEventListener('change', () => { if (mustChange.checked) cannotChange.checked = false; });
+  cannotChange.addEventListener('change', () => { if (cannotChange.checked) mustChange.checked = false; });
+
+  const neverExpires = el('input', { type: 'checkbox' }); neverExpires.checked = u.passwordNeverExpires !== false;
+  const expiresAt = el('input', { type: 'date', value: u.passwordExpiresAt ? u.passwordExpiresAt.slice(0, 10) : '' });
+  expiresAt.disabled = neverExpires.checked;
+  neverExpires.addEventListener('change', () => { expiresAt.disabled = neverExpires.checked; });
+
+  const newPw = el('input', { type: 'password', placeholder: 'Leave blank to keep current password' });
+  const confirmNewPw = el('input', { type: 'password', placeholder: 'Confirm new password' });
+  const errEl = el('div', { class: 'err' });
+
+  // "Force password change" defaults to whatever the account's CURRENT
+  // flag happens to be, which has nothing to do with the password being
+  // typed here — reset a long-since-activated account's password without
+  // touching this checkbox and it silently hands over a password only
+  // the admin knows, no forced follow-up. Suggest the safe choice the
+  // moment a new password is actually entered; still fully overridable
+  // by hand afterward. Only fires on the empty->non-empty transition, so
+  // it doesn't fight a deliberate uncheck while they keep typing.
+  let hadPassword = false;
+  newPw.addEventListener('input', () => {
+    if (newPw.value && !hadPassword) { mustChange.checked = true; cannotChange.checked = false; }
+    hadPassword = !!newPw.value;
+  });
+
+  async function disableMfa() {
+    if (!confirm(`Disable two-factor authentication for "${u.username}"? Not recommended — only do this if they've lost both their authenticator and their backup codes.`)) return;
+    try {
+      await api('/users/' + u.uid + '/mfa/disable', { method: 'POST' });
+      closeModal();
+      toast('Two-factor disabled', 'ok');
+      renderUsers(document.getElementById('content'));
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  async function save() {
+    errEl.textContent = '';
+    if (newPw.value && newPw.value !== confirmNewPw.value) {
+      errEl.textContent = 'New password and confirmation do not match.';
+      return;
+    }
+    try {
+      const body = {
+        role: role.value, disabled: disabled.checked, fullName: fullName.value, email: email.value, description: description.value,
+        emailVerified: emailVerified.checked,
+        mustChangePassword: mustChange.checked, cannotChangePassword: cannotChange.checked,
+        passwordNeverExpires: neverExpires.checked,
+        passwordExpiresAt: neverExpires.checked ? null : (expiresAt.value ? new Date(expiresAt.value).toISOString() : null),
+      };
+      if (newPw.value) { body.password = newPw.value; body.confirmPassword = confirmNewPw.value; }
+      await api('/users/' + u.uid, { method: 'PATCH', body });
+      if (newPw.value) {
+        downloadLogonCard({ username: u.username, password: newPw.value, fullName: fullName.value || u.fullName, roleLabel: roleLabel(role.value) });
+      }
+      closeModal();
+      toast(newPw.value ? 'Updated — logon card downloaded' : 'Updated', 'ok');
+      renderUsers(document.getElementById('content'));
+    } catch (e) { errEl.textContent = e.message; }
+  }
+  async function del() {
+    if (!confirm('Delete "' + u.username + '"? This cannot be undone.')) return;
+    try {
+      await api('/users/' + u.uid, { method: 'DELETE' });
+      closeModal();
+      toast('Deleted', 'ok');
+      renderUsers(document.getElementById('content'));
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  openModal([
+    el('h3', {}, [avatarNode(u, 'small'), el('span', { text: 'Manage ' + u.username })]),
+    el('div', { class: 'field-row' }, [
+      el('div', {}, [el('label', { text: 'Full name' }), fullName]),
+      el('div', {}, [el('label', { text: 'Role' }), role]),
+    ]),
+    el('label', { text: 'Email' }), email,
+    el('label', { text: 'Description' }), description,
+    el('div', { class: 'checkline' }, [disabled, el('span', { text: 'Account disabled' })]),
+    el('div', { class: 'checkline' }, [emailVerified, el('span', { text: 'Email verified' })]),
+
+    el('div', { class: 'divider' }),
+    el('div', { class: 'muted', text: 'TWO-FACTOR AUTHENTICATION' }),
+    u.mfaEnabled
+      ? el('div', {}, [
+          el('span', { class: 'badge ok', style: 'display:inline-block;margin-bottom:8px', text: 'Enabled' }),
+          el('div', {}, [el('button', { class: 'btn-danger btn-sm', text: 'Disable two-factor', onclick: disableMfa })]),
+        ])
+      : el('div', { class: 'muted', text: 'Not enabled for this account.' }),
+
+    el('div', { class: 'divider' }),
+    el('div', { class: 'muted', text: 'PASSWORD POLICY' }),
+    el('div', { class: 'checkline' }, [mustChange, el('span', { text: 'Force password change on next login' })]),
+    el('div', { class: 'checkline' }, [cannotChange, el('span', { text: 'User cannot change their own password' })]),
+    el('div', { class: 'checkline' }, [neverExpires, el('span', { text: 'Password never expires' })]),
+    el('label', { text: 'Expires on', style: 'margin-top:4px' }), expiresAt,
+
+    el('div', { class: 'divider' }),
+    el('label', { text: 'Reset password' }), newPw,
+    el('label', { text: 'Confirm new password' }), confirmNewPw,
+    errEl,
+
+    el('div', { class: 'divider' }),
+    el('div', { id: 'manage-user-sessions' }, [el('div', { class: 'muted', text: 'Loading active sessions…' })]),
+
+    el('div', { class: 'modal-actions' }, [
+      el('button', { class: 'btn-danger', text: 'Delete user', onclick: del }),
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Cancel', onclick: closeModal }),
+        el('button', { class: 'btn-primary', text: 'Save', onclick: save }),
+      ]),
+    ]),
+  ]);
+
+  loadUserSessions(u.uid);
+}
+
+async function loadUserSessions(uid) {
+  const wrap = document.getElementById('manage-user-sessions');
+  if (!wrap) return;
+  try {
+    const sessions = await api('/users/' + uid + '/sessions');
+    if (!document.getElementById('manage-user-sessions')) return; // modal closed mid-fetch
+    renderSessionsInto(wrap, sessions, {
+      onRevoke: async (tokenHash) => {
+        await api('/users/' + uid + '/sessions/' + tokenHash, { method: 'DELETE' });
+        toast('Signed out of that session', 'ok');
+        loadUserSessions(uid);
+      },
+      onRevokeAll: async () => {
+        await api('/users/' + uid + '/sessions/revoke-all', { method: 'POST' });
+        toast('Signed out everywhere', 'ok');
+        loadUserSessions(uid);
+      },
+    }, 'Apps this user is currently signed into via Passport Consumer.');
+  } catch (e) {
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class: 'err', text: 'Could not load sessions: ' + e.message }));
+  }
+}
+
+/* ---------------- apps tab (admin only) ---------------- */
+const AUTH_METHODS = ['passport', 'oidc'];
+
+async function renderApps(content) {
+  const apps = await api('/apps');
+  content.innerHTML = '';
+  const table = tableWrap(el('table', {}, [
+    el('thead', {}, [el('tr', {}, tableHeaders(['Name', 'Slug', 'Auth method', 'Status', '']))]),
+    el('tbody', {}, apps.map(appRow)),
+  ]));
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('apps'), el('span', { text: 'Registered apps' })]),
+    el('div', { class: 'pagesub', text: 'Each app gets its own appId + secret, sent as X-App-Id / X-App-Secret on every /api/v1/* request.' }),
+    el('div', { class: 'toolbar' }, [
+      el('div'),
+      el('button', { class: 'btn-primary', text: '+ Register app', onclick: openCreateAppModal }),
+    ]),
+    table,
+  ]));
+}
+
+function appRow(a) {
+  const statusBadge = a.disabled ? el('span', { class: 'badge disabled', text: 'disabled' }) : el('span', { class: 'badge ok', text: 'active' });
+  const authBadge = el('span', { class: 'badge', text: a.authMethod });
+  const actions = [
+    el('button', { class: 'btn-ghost btn-sm', text: 'Access', onclick: () => openAppAccessModal(a) }),
+  ];
+  if (a.authMethod === 'oidc') actions.push(el('button', { class: 'btn-ghost btn-sm', text: 'OIDC info', onclick: () => openOidcInfoModal(a) }));
+  if (a.authMethod === 'passport') {
+    actions.push(el('button', {
+      class: 'btn-ghost btn-sm',
+      text: a.supportsMfaChallenge ? 'MFA challenge: on' : 'MFA challenge: off',
+      onclick: () => toggleMfaSupport(a),
+    }));
+  }
+  actions.push(
+    el('button', { class: 'btn-ghost btn-sm', text: 'Regenerate secret', onclick: () => regenerateSecret(a) }),
+    el('button', { class: 'btn-ghost btn-sm', text: a.disabled ? 'Enable' : 'Disable', onclick: () => toggleApp(a) }),
+  );
+  return el('tr', {}, [
+    el('td', { text: a.name }),
+    el('td', {}, [el('span', { class: 'badge', style: 'font-family:var(--mono)', text: a.slug })]),
+    el('td', {}, [authBadge]),
+    el('td', {}, [statusBadge]),
+    el('td', { class: 'row-actions' }, actions),
+  ]);
+}
+
+function openCreateAppModal() {
+  const slug = el('input', { type: 'text', placeholder: 'e.g. interstellar-console' });
+  const name = el('input', { type: 'text', placeholder: 'e.g. Interstellar Console' });
+  const authMethod = el('select', {}, AUTH_METHODS.map((m) => el('option', { value: m, text: m })));
+  const redirectUris = el('textarea', { rows: '2', placeholder: 'https://client.example.com/callback\n(one per line)' });
+  const redirectUrisWrap = el('div', {}, [
+    el('label', { text: 'Redirect URIs (one per line)' }), redirectUris,
+    el('div', { class: 'hint', text: 'Where Passport Consumer is allowed to send the user back after they sign in — must match exactly.' }),
+  ]);
+  redirectUrisWrap.style.display = 'none';
+  authMethod.addEventListener('change', () => { redirectUrisWrap.style.display = authMethod.value === 'oidc' ? '' : 'none'; });
+  const errEl = el('div', { class: 'err' });
+
+  async function submit() {
+    try {
+      const body = { slug: slug.value, name: name.value, authMethod: authMethod.value };
+      if (authMethod.value === 'oidc') body.redirectUris = redirectUris.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      const { app, secret } = await api('/apps', { method: 'POST', body });
+      closeModal();
+      if (app.authMethod === 'oidc') openOidcInfoModal(app, secret);
+      else renderSecretModal(app, secret);
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  openModal([
+    el('h3', {}, [icon('apps'), el('span', { text: 'Register app' })]),
+    el('label', { text: 'Slug (used in the appId lookup)' }), slug,
+    el('label', { text: 'Display name' }), name,
+    el('label', { text: 'Auth method' }), authMethod,
+    el('div', { class: 'hint', text: '"passport" (this service’s own username/password + register/login contract) and "oidc" (OpenID Connect) are the only two supported methods.' }),
+    redirectUrisWrap,
+    errEl,
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Cancel', onclick: closeModal }),
+        el('button', { class: 'btn-primary', text: 'Register', onclick: submit }),
+      ]),
+    ]),
+  ]);
+}
+
+/** Passport Consumer is the Identity Provider here — this is what a client app's OIDC library needs to point at it. */
+function openOidcInfoModal(app, secret) {
+  function copy(text) { copyWithAutoClear(text); }
+  const redirectUris = el('textarea', { rows: '2' }); redirectUris.value = (app.redirectUris || []).join('\n');
+  const errEl = el('div', { class: 'err' });
+  async function saveRedirectUris() {
+    errEl.textContent = '';
+    try {
+      const updated = await api(`/apps/${app.appId}/redirect-uris`, { method: 'PUT', body: { redirectUris: redirectUris.value.split('\n').map((s) => s.trim()).filter(Boolean) } });
+      toast('Redirect URIs saved', 'ok');
+      app.redirectUris = updated.app.redirectUris;
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  const children = [
+    el('h3', { text: '"' + app.name + '" — OIDC connection info' }),
+    el('div', { class: 'muted', text: 'Discovery document:' }),
+    el('div', { class: 'secret-box' }, [el('span', { text: `${location.origin}/.well-known/openid-configuration` })]),
+    el('div', { class: 'muted', text: 'client_id:', style: 'margin-top:10px' }),
+    el('div', { class: 'secret-box' }, [el('span', { text: app.appId })]),
+    el('button', { class: 'btn-ghost btn-sm', text: 'Copy client_id', style: 'margin-top:6px', onclick: () => copy(app.appId) }),
+  ];
+  if (secret) {
+    children.push(
+      el('div', { class: 'muted', text: 'client_secret — save this now, it will not be shown again:', style: 'margin-top:14px' }),
+      el('div', { class: 'secret-box' }, [el('span', { text: secret })]),
+      el('button', { class: 'btn-ghost btn-sm', text: 'Copy client_secret', style: 'margin-top:6px', onclick: () => copy(secret) }),
+    );
+  }
+  children.push(
+    el('label', { text: 'Redirect URIs (one per line)', style: 'margin-top:14px' }), redirectUris,
+    el('button', { class: 'btn-ghost btn-sm', text: 'Save redirect URIs', style: 'margin-top:6px', onclick: saveRedirectUris }),
+    errEl,
+    el('div', { class: 'hint', text: 'PKCE (S256) is required on every authorization request.' }),
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [el('button', { class: 'btn-primary', text: 'Done', onclick: closeModal })]),
+    ]),
+  );
+  openModal(children);
+}
+
+/**
+ * Per-user access overrides for one app — the accounts an admin has
+ * specifically blocked from this app without disabling the app itself.
+ */
+async function openAppAccessModal(a) {
+  const listWrap = el('div', {});
+  const errEl = el('div', { class: 'err' });
+  openModal([
+    el('h3', {}, [icon('apps'), el('span', { text: '"' + a.name + '" access' })]),
+    el('div', { class: 'hint', text: 'Users blocked here can’t sign into this app even though their account is otherwise fine — /api/v1/login returns "good-no-access" for them.' }),
+    listWrap,
+    errEl,
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [el('button', { class: 'btn-ghost', text: 'Close', onclick: closeModal })]),
+    ]),
+  ]);
+
+  async function refresh() {
+    listWrap.innerHTML = 'Loading…';
+    try {
+      const [{ blocked }, users] = await Promise.all([
+        api(`/apps/${a.appId}/access`),
+        api('/users').catch(() => null),
+      ]);
+      listWrap.innerHTML = '';
+      const blockedUids = new Set(blocked.map((b) => b.uid));
+
+      if (blocked.length) {
+        listWrap.appendChild(el('div', { class: 'hint', text: 'Currently blocked:' }));
+        blocked.forEach((b) => {
+          listWrap.appendChild(el('div', { class: 'name-cell', style: 'margin:6px 0' }, [
+            el('span', { text: b.username, style: 'flex:1' }),
+            el('button', { class: 'btn-ghost btn-sm', text: 'Unblock', onclick: async () => {
+              try { await api(`/apps/${a.appId}/access/${b.uid}/unblock`, { method: 'POST' }); refresh(); }
+              catch (e) { errEl.textContent = e.message; }
+            } }),
+          ]));
+        });
+      } else {
+        listWrap.appendChild(el('div', { class: 'muted', text: 'No users are blocked from this app.' }));
+      }
+
+      if (users) {
+        const candidates = users.filter((u) => !blockedUids.has(u.uid));
+        if (candidates.length) {
+          const select = el('select', {}, candidates.map((u) => el('option', { value: u.uid, text: u.username })));
+          const blockBtn = el('button', { class: 'btn-danger btn-sm', text: 'Block', onclick: async () => {
+            try { await api(`/apps/${a.appId}/access/${select.value}/block`, { method: 'POST' }); refresh(); }
+            catch (e) { errEl.textContent = e.message; }
+          } });
+          listWrap.appendChild(el('div', { class: 'divider' }));
+          listWrap.appendChild(el('div', { style: 'display:flex;gap:8px' }, [select, blockBtn]));
+        }
+      }
+    } catch (e) {
+      listWrap.innerHTML = '';
+      errEl.textContent = e.message;
+    }
+  }
+
+  refresh();
+}
+
+function renderSecretModal(app, secret) {
+  function copy(text) { copyWithAutoClear(text); }
+  openModal([
+    el('h3', { text: '"' + app.name + '" registered' }),
+    el('div', { class: 'muted', text: 'App ID:' }),
+    el('div', { class: 'secret-box' }, [el('span', { text: app.appId })]),
+    el('button', { class: 'btn-ghost btn-sm', text: 'Copy App ID', style: 'margin-top:6px', onclick: () => copy(app.appId) }),
+    el('div', { class: 'muted', text: 'Secret — save this now, it will not be shown again:', style: 'margin-top:14px' }),
+    el('div', { class: 'secret-box' }, [el('span', { text: secret })]),
+    el('button', { class: 'btn-ghost btn-sm', text: 'Copy Secret', style: 'margin-top:6px', onclick: () => copy(secret) }),
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-primary', text: 'Done', onclick: () => { closeModal(); renderApps(document.getElementById('content')); } }),
+      ]),
+    ]),
+  ]);
+}
+
+async function regenerateSecret(a) {
+  if (!confirm('Regenerate the secret for "' + a.name + '"? The old secret stops working immediately.')) return;
+  try {
+    const { app, secret } = await api('/apps/' + a.appId + '/regenerate-secret', { method: 'POST' });
+    renderSecretModal(app, secret);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function toggleApp(a) {
+  try {
+    await api('/apps/' + a.appId, { method: 'PATCH', body: { disabled: !a.disabled } });
+    renderApps(document.getElementById('content'));
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/**
+ * Whether this app gets good_mfa_required (and can call /login/mfa) for
+ * its MFA-enabled users, instead of the old dormant behavior. Off by
+ * default on every app — see routes/apiV1.js.
+ */
+async function toggleMfaSupport(a) {
+  try {
+    await api('/apps/' + a.appId + '/mfa-support', { method: 'PUT', body: { supportsMfaChallenge: !a.supportsMfaChallenge } });
+    renderApps(document.getElementById('content'));
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ---------------- activity tab (admin only) ---------------- */
+async function renderActivity(content) {
+  const categories = await api('/activity/categories');
+  content.innerHTML = '';
+
+  const categorySelect = el('select', {}, [
+    el('option', { value: '', text: 'All categories' }),
+    ...categories.map((c) => el('option', { value: c, text: c })),
+  ]);
+  const actorInput = el('input', { type: 'text', placeholder: 'e.g. aledeaux' });
+  const fromInput = el('input', { type: 'date' });
+  const toInput = el('input', { type: 'date' });
+  const activityTableWrap = el('div', {});
+
+  function buildQuery(extra) {
+    const params = new URLSearchParams();
+    if (categorySelect.value) params.set('category', categorySelect.value);
+    if (actorInput.value) params.set('actor', actorInput.value);
+    if (fromInput.value) params.set('from', new Date(fromInput.value).toISOString());
+    if (toInput.value) params.set('to', new Date(toInput.value + 'T23:59:59').toISOString());
+    Object.entries(extra || {}).forEach(([k, v]) => params.set(k, v));
+    return params.toString();
+  }
+
+  async function applyFilters() {
+    const activity = await api('/activity?' + buildQuery());
+    activityTableWrap.innerHTML = '';
+    activityTableWrap.appendChild(tableWrap(el('table', {}, [
+      el('thead', {}, [el('tr', {}, ['When', 'Category', 'Actor', 'Message'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, activity.length ? activity.map((a) => el('tr', {}, [
+        el('td', { style: 'width:150px', text: new Date(a.created_at).toLocaleString() }),
+        el('td', {}, [el('span', { class: 'badge', text: a.category })]),
+        el('td', { text: a.actor_username || '—' }),
+        el('td', { text: a.message }),
+      ])) : [el('tr', {}, [el('td', { colspan: '4', class: 'empty-note', text: 'No activity matches these filters.' })])]),
+    ])));
+  }
+
+  function exportCsv() {
+    window.open('/api/activity/export?' + buildQuery(), '_blank');
+  }
+
+  [categorySelect, actorInput, fromInput, toInput].forEach((el2) => el2.addEventListener('change', applyFilters));
+  actorInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFilters(); });
+
+  const [, failedLogins] = await Promise.all([applyFilters(), api('/failed-logins')]);
+
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('activity'), el('span', { text: 'Activity' })]),
+    el('div', { class: 'pagesub', text: 'What’s happened across Passport Consumer recently.' }),
+
+    el('div', { class: 'filter-bar' }, [
+      el('div', { class: 'fgroup' }, [el('label', { text: 'Category' }), categorySelect]),
+      el('div', { class: 'fgroup' }, [el('label', { text: 'Actor' }), actorInput]),
+      el('div', { class: 'fgroup' }, [el('label', { text: 'From' }), fromInput]),
+      el('div', { class: 'fgroup' }, [el('label', { text: 'To' }), toInput]),
+      el('button', { class: 'btn-ghost', text: 'Apply', onclick: applyFilters }),
+      el('button', { class: 'btn-ghost', text: 'Export CSV', onclick: exportCsv }, [icon('download')]),
+    ]),
+
+    el('div', { class: 'panel' }, [activityTableWrap]),
+
+    el('h2', { style: 'margin-top:8px' }, [icon('key'), el('span', { text: 'Failed sign-ins' })]),
+    el('div', { class: 'panel' }, [
+      tableWrap(el('table', {}, [
+        el('thead', {}, [el('tr', {}, ['When', 'Username', 'IP', 'Reason'].map((h) => el('th', { text: h })))]),
+        el('tbody', {}, failedLogins.map((f) => el('tr', {}, [
+          el('td', { style: 'width:150px', text: new Date(f.created_at).toLocaleString() }),
+          el('td', { text: f.username || '—' }),
+          el('td', { text: f.ip || '—' }),
+          el('td', {}, [el('span', { class: 'badge ' + (f.reason === 'disabled' ? 'disabled' : 'warn'), text: f.reason || '—' })]),
+        ]))),
+      ])),
+    ]),
+  ]));
+}
+
+/* ---------------- password policy tab (admin only) ---------------- */
+async function renderPasswordPolicy(content) {
+  const { rules, ruleTypes } = await api('/password-policy');
+  content.innerHTML = '';
+
+  const table = tableWrap(el('table', {}, [
+    el('thead', {}, [el('tr', {}, tableHeaders(['Rule', 'Type', 'Params', 'Enabled', '']))]),
+    el('tbody', {}, rules.map((r) => policyRuleRow(r))),
+  ]));
+
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('policy'), el('span', { text: 'Password Policy' })]),
+    el('div', { class: 'pagesub', text: 'Rules a new self-service password (including self-registration) must satisfy. Bypassed entirely when a password is set from the console or by an admin resetting someone else’s account.' }),
+    el('div', { class: 'toolbar' }, [
+      el('div'),
+      el('button', { class: 'btn-primary', text: '+ New rule', onclick: () => openPolicyRuleModal(null, ruleTypes) }),
+    ]),
+    table,
+  ]));
+}
+
+function policyRuleRow(r) {
+  const toggle = el('button', { class: 'btn-ghost btn-sm', text: r.enabled ? 'Disable' : 'Enable', onclick: async () => {
+    try { await api('/password-policy/' + r.id, { method: 'PATCH', body: { enabled: !r.enabled } }); renderPasswordPolicy(document.getElementById('content')); }
+    catch (e) { toast(e.message, 'err'); }
+  } });
+  const editBtn = el('button', { class: 'btn-ghost btn-sm', text: 'Edit', onclick: () => openPolicyRuleModal(r, null) });
+  const deleteBtn = el('button', { class: 'btn-danger btn-sm', text: 'Delete', onclick: async () => {
+    if (!confirm(`Delete the "${r.label}" rule?`)) return;
+    try { await api('/password-policy/' + r.id, { method: 'DELETE' }); renderPasswordPolicy(document.getElementById('content')); }
+    catch (e) { toast(e.message, 'err'); }
+  } });
+  return el('tr', {}, [
+    el('td', { text: r.label }),
+    el('td', {}, [el('span', { class: 'badge', style: 'font-family:var(--mono)', text: r.type })]),
+    el('td', { style: 'font-family:var(--mono);font-size:11px', text: JSON.stringify(r.params) }),
+    el('td', {}, [el('span', { class: 'badge ' + (r.enabled ? 'ok' : 'disabled'), text: r.enabled ? 'enabled' : 'disabled' })]),
+    el('td', { class: 'row-actions' }, [toggle, editBtn, deleteBtn]),
+  ]);
+}
+
+/** New rules are created from a chosen TYPE (see src/utils/passwordPolicy.js) with a JSON params blob — kept as raw JSON here rather than one bespoke form per type, since the whole point is that new types shouldn't need new UI. */
+function openPolicyRuleModal(rule, ruleTypes) {
+  const isNew = !rule;
+  const type = isNew
+    ? el('select', {}, ruleTypes.map((t) => el('option', { value: t, text: t })))
+    : el('input', { type: 'text', value: rule.type, disabled: 'disabled' });
+  const label = el('input', { type: 'text', value: rule ? rule.label : '', placeholder: 'e.g. 2 symbols minimum' });
+  const params = el('textarea', { rows: '4', style: 'font-family:var(--mono);font-size:12px' });
+  params.value = JSON.stringify(rule ? rule.params : {}, null, 2);
+  const errEl = el('div', { class: 'err' });
+
+  async function submit() {
+    errEl.textContent = '';
+    let parsedParams;
+    try { parsedParams = JSON.parse(params.value || '{}'); } catch (e) { errEl.textContent = 'Params must be valid JSON.'; return; }
+    try {
+      if (isNew) {
+        await api('/password-policy', { method: 'POST', body: { type: type.value, label: label.value, params: parsedParams } });
+        toast('Rule created', 'ok');
+      } else {
+        await api('/password-policy/' + rule.id, { method: 'PATCH', body: { label: label.value, params: parsedParams } });
+        toast('Rule updated', 'ok');
+      }
+      closeModal();
+      renderPasswordPolicy(document.getElementById('content'));
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  openModal([
+    el('h3', {}, [icon('policy'), el('span', { text: isNew ? 'New password rule' : 'Edit password rule' })]),
+    el('label', { text: 'Type' }), type,
+    el('label', { text: 'Label (shown to users when this rule fails)' }), label,
+    el('label', { text: 'Params (JSON)' }), params,
+    errEl,
+    el('div', { class: 'modal-actions' }, [
+      el('div', { class: 'right' }, [
+        el('button', { class: 'btn-ghost', text: 'Cancel', onclick: closeModal }),
+        el('button', { class: 'btn-primary', text: isNew ? 'Create' : 'Save', onclick: submit }),
+      ]),
+    ]),
+  ]);
+}
+
+/* ---------------- email / SMTP tab (admin only) ---------------- */
+async function renderEmailSettings(content) {
+  const settings = await api('/email-settings');
+  content.innerHTML = '';
+
+  const enabled = el('input', { type: 'checkbox' }); enabled.checked = settings.enabled;
+  const host = el('input', { type: 'text', value: settings.host || '', placeholder: 'smtp.example.com' });
+  const port = el('input', { type: 'number', value: settings.port || 587 });
+  const secure = el('input', { type: 'checkbox' }); secure.checked = settings.secure;
+  const username = el('input', { type: 'text', value: settings.username || '' });
+  const password = el('input', { type: 'password', placeholder: settings.hasPassword ? '•••••••• (unchanged)' : 'SMTP password' });
+  const fromAddress = el('input', { type: 'text', value: settings.fromAddress || '', placeholder: 'noreply@example.com' });
+  const fromName = el('input', { type: 'text', value: settings.fromName || 'Passport Consumer' });
+  const errEl = el('div', { class: 'err' });
+
+  async function save() {
+    errEl.textContent = '';
+    try {
+      const body = { enabled: enabled.checked, host: host.value, port: port.value, secure: secure.checked, username: username.value, fromAddress: fromAddress.value, fromName: fromName.value };
+      if (password.value) body.password = password.value;
+      await api('/email-settings', { method: 'PUT', body });
+      toast('Email settings saved', 'ok');
+      renderEmailSettings(content);
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  const testTo = el('input', { type: 'text', placeholder: 'you@example.com (optional — defaults to your own account email)' });
+  async function sendTest() {
+    try {
+      await api('/email-settings/test', { method: 'POST', body: { to: testTo.value || undefined } });
+      toast('Test email sent', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('email'), el('span', { text: 'Email' })]),
+    el('div', { class: 'pagesub', text: 'SMTP settings Passport Consumer uses to send account notifications (verification links, password changes, expiry warnings, unknown sign-ins, and more).' }),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('email'), el('span', { text: 'SMTP server' })]),
+      el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:400' }, [enabled, el('span', { text: 'Enabled' })]),
+      el('label', { text: 'Host' }), host,
+      el('label', { text: 'Port' }), port,
+      el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:400' }, [secure, el('span', { text: 'Use TLS' })]),
+      el('label', { text: 'Username' }), username,
+      el('label', { text: 'Password' }), password,
+      el('label', { text: 'From address' }), fromAddress,
+      el('label', { text: 'From name' }), fromName,
+      errEl,
+      el('button', { class: 'btn-primary', text: 'Save', style: 'margin-top:14px', onclick: save }),
+    ]),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('activity'), el('span', { text: 'Send a test email' })]),
+      testTo,
+      el('button', { class: 'btn-ghost btn-sm', text: 'Send test', style: 'margin-top:10px', onclick: sendTest }),
+    ]),
+  ]));
+}
+
+/* ---------------- settings tab (admin only, site branding) ---------------- */
+async function renderSettings(content) {
+  const branding = await api('/branding');
+  content.innerHTML = '';
+
+  const siteName = el('input', { type: 'text', value: branding.siteName, maxlength: '60' });
+  async function saveName() {
+    try {
+      const settings = await api('/branding', { method: 'PUT', body: { siteName: siteName.value } });
+      state.branding = settings;
+      state.brandingV = (state.brandingV || 0) + 1;
+      toast('Site name updated', 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  const logoFile = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', style: 'display:none' });
+  const logoPreview = branding.logoExt
+    ? el('img', { class: 'logo-preview', src: `/branding/logo.${branding.logoExt}?v=${Date.now()}`, alt: '' })
+    : el('div', { class: 'logo-preview', style: 'display:flex;align-items:center;justify-content:center;color:var(--text-faint);font-size:11px', text: 'None' });
+
+  logoFile.addEventListener('change', async () => {
+    if (!logoFile.files[0]) return;
+    const fd = new FormData();
+    fd.append('logo', logoFile.files[0]);
+    try {
+      const { settings } = await api('/branding/logo', { method: 'POST', body: fd });
+      state.branding = settings;
+      state.brandingV = (state.brandingV || 0) + 1;
+      toast('Logo updated', 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+
+  async function removeLogo() {
+    try {
+      const { settings } = await api('/branding/logo', { method: 'DELETE' });
+      state.branding = settings;
+      toast('Logo removed', 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  content.appendChild(el('div', {}, [
+    el('h2', {}, [icon('settings'), el('span', { text: 'Settings' })]),
+    el('div', { class: 'pagesub', text: 'Branding shown on the login screen and header, for every app connected to Passport Consumer.' }),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('account'), el('span', { text: 'Site name' })]),
+      siteName,
+      el('button', { class: 'btn-primary', text: 'Save', style: 'margin-top:14px', onclick: saveName }),
+    ]),
+
+    el('div', { class: 'panel' }, [
+      el('h3', {}, [icon('upload'), el('span', { text: 'Logo' })]),
+      el('div', { style: 'display:flex;align-items:center;gap:16px' }, [
+        logoPreview,
+        el('div', {}, [
+          el('button', { class: 'btn-ghost btn-sm', text: branding.logoExt ? 'Replace logo' : 'Upload logo', onclick: () => logoFile.click() }),
+          branding.logoExt ? el('button', { class: 'btn-ghost btn-sm', text: 'Remove', style: 'margin-left:8px', onclick: removeLogo }) : null,
+        ]),
+      ]),
+      logoFile,
+      el('div', { class: 'hint', text: 'PNG, JPEG, or WEBP, up to 1MB. Falls back to the default Passport Consumer mark if not set.' }),
+    ]),
+  ]));
+}
+
+/* ---------------- modal helper ---------------- */
+function openModal(children) {
+  closeModal();
+  const backdrop = el('div', { class: 'modal-backdrop', id: 'modal-backdrop' }, [el('div', { class: 'modal' }, children)]);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.body.appendChild(backdrop);
+}
+function closeModal() {
+  const existing = document.getElementById('modal-backdrop');
+  if (existing) existing.remove();
+}
+
+boot();
+</script>
+</body>
+</html>
