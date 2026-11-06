@@ -40,13 +40,15 @@ module.exports = function usersRoutes({ userStore, sessionStore, activityLog, mf
 
   router.post('/users', express.json(), async (req, res) => {
     try {
-      const { username, password, role, fullName, description, email } = req.body || {};
+      const { username, password, role, fullName, description, email, displayName, officeLocation, department, phone, networkId } = req.body || {};
       if (role !== 'user' && role !== 'admin') throw new Error('Invalid role');
       // Admin-created accounts (this panel, the CLI) keep the classic
       // forced-password-change-on-first-login behavior — no
       // selfRegistered flag — and start emailVerified: true if given an
       // email (the admin vouches for it). See userStore.create().
-      const profile = await userStore.create({ username, password, role, fullName, description, email });
+      const profile = await userStore.create({
+        username, password, role, fullName, description, email, displayName, officeLocation, department, phone, networkId,
+      });
       await activityLog.add('admin', `${actorName(req)} created user "${profile.username}" (${profile.role})`, actor(req), actorName(req));
       res.json({ ok: true, profile });
     } catch (err) {
@@ -95,7 +97,10 @@ module.exports = function usersRoutes({ userStore, sessionStore, activityLog, mf
       }
 
       const rest = {};
-      ['fullName', 'description', 'email', 'emailVerified', 'theme', 'disabled', 'mustChangePassword', 'cannotChangePassword', 'passwordNeverExpires', 'passwordExpiresAt'].forEach((k) => {
+      [
+        'fullName', 'description', 'email', 'emailVerified', 'theme', 'disabled', 'mustChangePassword', 'cannotChangePassword', 'passwordNeverExpires', 'passwordExpiresAt',
+        'displayName', 'officeLocation', 'department', 'phone', 'networkId',
+      ].forEach((k) => {
         if (Object.prototype.hasOwnProperty.call(body, k)) rest[k] = body[k];
       });
       if (Object.keys(rest).length) await userStore.update(req.params.uid, rest);

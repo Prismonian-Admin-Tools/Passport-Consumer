@@ -19,6 +19,15 @@ function toProfile(row) {
     emailVerified: row.email_verified,
     fullName: row.full_name,
     description: row.description,
+    // Directory fields synced in from Rally — admin/CLI-managed only
+    // (see routes/users.js and scripts/passport-cli.js's
+    // `users set-directory-info`), no self-service edit path for any of
+    // these, unlike fullName/description/theme above.
+    displayName: row.display_name,
+    officeLocation: row.office_location,
+    department: row.department,
+    phone: row.phone,
+    networkId: row.network_id,
     disabled: row.disabled,
     mustChangePassword: row.must_change_password,
     cannotChangePassword: row.cannot_change_password,
@@ -75,6 +84,7 @@ const JOINED_SELECT = `
          p.password_hash, p.password_simhash, p.must_change_password, p.cannot_change_password,
          p.password_never_expires, p.password_expires_at, p.mfa_enabled,
          d.role, d.full_name, d.description, d.email, d.email_verified, d.disabled, d.theme, d.avatar_ext, d.last_login,
+         d.display_name, d.office_location, d.department, d.phone, d.network_id,
          d.updated_at
   FROM users u
   JOIN usernames un ON un.uid = u.uid
@@ -184,7 +194,10 @@ class UserStore {
    *
    * Writes span three tables, so it's one transaction.
    */
-  async create({ username, password, role = 'user', fullName, description, email, selfRegistered = false }) {
+  async create({
+    username, password, role = 'user', fullName, description, email, selfRegistered = false,
+    displayName, officeLocation, department, phone, networkId,
+  }) {
     if (role !== 'user' && role !== 'admin') throw new Error('Invalid role');
     if (!username || !username.trim()) throw new Error('Username is required');
     if (!password || password.length < 8) throw new Error('Password must be at least 8 characters');
@@ -207,8 +220,11 @@ class UserStore {
         [uid, passwordHash, simhash64(password), !selfRegistered]
       );
       await client.query(
-        'INSERT INTO userdata (uid, role, full_name, description, email, email_verified) VALUES ($1, $2, $3, $4, $5, $6)',
-        [uid, role, fullName || '', description || '', email || null, emailVerified]
+        `INSERT INTO userdata (uid, role, full_name, description, email, email_verified,
+           display_name, office_location, department, phone, network_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [uid, role, fullName || '', description || '', email || null, emailVerified,
+          displayName || null, officeLocation || null, department || null, phone || null, networkId || null]
       );
       await client.query('COMMIT');
     } catch (err) {
@@ -335,6 +351,12 @@ class UserStore {
     const userdataEditable = {
       fullName: 'full_name', description: 'description', theme: 'theme',
       email: 'email', emailVerified: 'email_verified', disabled: 'disabled', avatarExt: 'avatar_ext',
+      // Directory fields synced in from Rally — admin/CLI-managed only;
+      // this same update() is also the self-service path (account.js),
+      // but that route's own body allowlist never forwards these keys,
+      // so a user can never reach this branch for their own account.
+      displayName: 'display_name', officeLocation: 'office_location', department: 'department',
+      phone: 'phone', networkId: 'network_id',
     };
     const passwordEditable = {
       mustChangePassword: 'must_change_password', cannotChangePassword: 'cannot_change_password',

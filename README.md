@@ -138,6 +138,11 @@ password change — that's the whole point of "forced."
   "emailVerified": false,
   "fullName": "",
   "description": "",
+  "displayName": null,
+  "officeLocation": null,
+  "department": null,
+  "phone": null,
+  "networkId": null,
   "disabled": false,
   "mustChangePassword": false,
   "cannotChangePassword": false,
@@ -159,6 +164,27 @@ password change — that's the whole point of "forced."
 omitted from the one handed to calling apps (see
 [MFA](#multi-factor-authentication-dormant)).
 
+### Directory fields
+
+`displayName`, `officeLocation` (building/suite), `department`, `phone`,
+and `networkId` are plain directory fields synced in from Rally
+(Prismonian's HR/directory system) — unlike `fullName`/`description`,
+there is **no self-service edit path** for any of them: an account
+holder can't change these from My Account or via `/api/v1/update-
+profile`, only an admin can, via the Users tab, `PATCH /api/users/:uid`,
+or the CLI's `users create [--display-name ...] [--office-location ...]
+[--department ...] [--phone ...] [--network-id ...]` and
+`users set-directory-info <username> [...same flags...]` (the latter
+bundles all five into one call, since a sync job writing this data back
+from Rally is the expected caller, not someone typing five separate
+commands). None of the five are unique-constrained or used as a lookup
+key — same reasoning as `email` in the data model below, this is
+directory data Passport Consumer stores and displays, not something it
+enforces uniqueness on. All five ARE included in the profile handed to
+calling apps (same tier as `fullName`/`description`, which apps already
+see) — an app wanting to show "Engineering, Building 4" alongside a
+user's name doesn't need a second lookup against Rally itself.
+
 ### Data model
 
 An "account" is really four tables, not one: `users` is a minimal
@@ -171,7 +197,7 @@ foreign key actually points to — with `usernames`, `passwords`, and
 | `users` | `uid` (the stable identity), `created_at` |
 | `usernames` | `username` |
 | `passwords` | `password_hash`, `password_simhash`, `mustChangePassword`, `cannotChangePassword`, `passwordNeverExpires`, `passwordExpiresAt`, MFA secret/flag |
-| `userdata` | `role`, `fullName`, `description`, `email`, `emailVerified`, `disabled`, `theme`, `avatarExt`, `lastLogin` |
+| `userdata` | `role`, `fullName`, `description`, `email`, `emailVerified`, `disabled`, `theme`, `avatarExt`, `lastLogin`, and the [directory fields](#directory-fields) (`displayName`, `officeLocation`, `department`, `phone`, `networkId`) |
 
 This is purely internal: `src/models/userStore.js` joins all four back
 into the single shape shown above before anything else in the codebase
@@ -403,10 +429,12 @@ users/:uid`, or `users set-email <username> <email>` in the CLI.
 - **Users** — create, edit, bulk enable/disable/delete, CSV import (each
   imported row gets its own random temp password, downloadable as a CSV
   afterward), full password-policy control per user (force change, can't-
-  change, expiry date), and an at-a-glance "unverified email" badge for
+  change, expiry date), an at-a-glance "unverified email" badge for
   self-registered accounts that haven't clicked their link yet — point
   the user at their app's own resend flow, or use
-  `POST /api/v1/resend-verification` directly. Admin only.
+  `POST /api/v1/resend-verification` directly — and the
+  [directory fields](#directory-fields) synced in from Rally (display
+  name, office/suite, department, phone, network ID). Admin only.
 - **Active Sessions** — every app currently holding a live token for a
   given account, with per-session or "sign out everywhere" revocation.
   Available both to a user for their own account (`/api/account/sessions`)

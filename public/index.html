@@ -1276,6 +1276,11 @@ function openCreateUserModal() {
   const fullName = el('input', { type: 'text', placeholder: 'optional' });
   const email = el('input', { type: 'email', placeholder: 'optional — used for account notifications; marks the account verified immediately' });
   const role = el('select', {}, ['user', 'admin'].map((r) => el('option', { value: r, text: roleLabel(r), selected: r === 'user' ? 'selected' : null })));
+  const displayName = el('input', { type: 'text', placeholder: 'optional' });
+  const officeLocation = el('input', { type: 'text', placeholder: 'e.g. Building 4, Suite 210' });
+  const department = el('input', { type: 'text', placeholder: 'optional' });
+  const phone = el('input', { type: 'text', placeholder: 'optional' });
+  const networkId = el('input', { type: 'text', placeholder: 'optional' });
   const errEl = el('div', { class: 'err' });
 
   function genPassword() {
@@ -1292,7 +1297,13 @@ function openCreateUserModal() {
     errEl.textContent = '';
     if (password.value !== confirmPw.value) { errEl.textContent = 'Passwords do not match.'; return; }
     try {
-      await api('/users', { method: 'POST', body: { username: username.value, password: password.value, role: role.value, fullName: fullName.value, email: email.value } });
+      await api('/users', {
+        method: 'POST',
+        body: {
+          username: username.value, password: password.value, role: role.value, fullName: fullName.value, email: email.value,
+          displayName: displayName.value, officeLocation: officeLocation.value, department: department.value, phone: phone.value, networkId: networkId.value,
+        },
+      });
       downloadLogonCard({ username: username.value, password: password.value, fullName: fullName.value, roleLabel: roleLabel(role.value) });
       closeModal();
       toast('User created — logon card downloaded', 'ok');
@@ -1309,6 +1320,17 @@ function openCreateUserModal() {
     el('label', { text: 'Confirm temporary password' }), confirmPw,
     el('div', { class: 'hint', text: 'At least 8 characters. They’ll be forced to change it on first login, no matter what.' }),
     el('label', { text: 'Role' }), role,
+    el('div', { class: 'divider' }),
+    el('div', { class: 'muted', text: 'DIRECTORY INFO (synced from Rally, optional)' }),
+    el('div', { class: 'field-row' }, [
+      el('div', {}, [el('label', { text: 'Display name' }), displayName]),
+      el('div', {}, [el('label', { text: 'Network ID' }), networkId]),
+    ]),
+    el('div', { class: 'field-row' }, [
+      el('div', {}, [el('label', { text: 'Office/suite' }), officeLocation]),
+      el('div', {}, [el('label', { text: 'Department' }), department]),
+    ]),
+    el('label', { text: 'Phone' }), phone,
     errEl,
     el('div', { class: 'modal-actions' }, [
       el('div', { class: 'right' }, [
@@ -1324,6 +1346,11 @@ function openManageUserModal(u) {
   const fullName = el('input', { type: 'text', value: u.fullName || '' });
   const email = el('input', { type: 'email', value: u.email || '', placeholder: 'used for account notifications' });
   const description = el('textarea', { rows: '2' }); description.value = u.description || '';
+  const displayName = el('input', { type: 'text', value: u.displayName || '' });
+  const officeLocation = el('input', { type: 'text', value: u.officeLocation || '', placeholder: 'e.g. Building 4, Suite 210' });
+  const department = el('input', { type: 'text', value: u.department || '' });
+  const phone = el('input', { type: 'text', value: u.phone || '' });
+  const networkId = el('input', { type: 'text', value: u.networkId || '' });
   const disabled = el('input', { type: 'checkbox' }); disabled.checked = u.disabled;
 
   const emailVerified = el('input', { type: 'checkbox' }); emailVerified.checked = !!u.emailVerified;
@@ -1379,6 +1406,7 @@ function openManageUserModal(u) {
         mustChangePassword: mustChange.checked, cannotChangePassword: cannotChange.checked,
         passwordNeverExpires: neverExpires.checked,
         passwordExpiresAt: neverExpires.checked ? null : (expiresAt.value ? new Date(expiresAt.value).toISOString() : null),
+        displayName: displayName.value, officeLocation: officeLocation.value, department: department.value, phone: phone.value, networkId: networkId.value,
       };
       if (newPw.value) { body.password = newPw.value; body.confirmPassword = confirmNewPw.value; }
       await api('/users/' + u.uid, { method: 'PATCH', body });
@@ -1410,6 +1438,18 @@ function openManageUserModal(u) {
     el('label', { text: 'Description' }), description,
     el('div', { class: 'checkline' }, [disabled, el('span', { text: 'Account disabled' })]),
     el('div', { class: 'checkline' }, [emailVerified, el('span', { text: 'Email verified' })]),
+
+    el('div', { class: 'divider' }),
+    el('div', { class: 'muted', text: 'DIRECTORY INFO (synced from Rally)' }),
+    el('div', { class: 'field-row' }, [
+      el('div', {}, [el('label', { text: 'Display name' }), displayName]),
+      el('div', {}, [el('label', { text: 'Network ID' }), networkId]),
+    ]),
+    el('div', { class: 'field-row' }, [
+      el('div', {}, [el('label', { text: 'Office/suite' }), officeLocation]),
+      el('div', {}, [el('label', { text: 'Department' }), department]),
+    ]),
+    el('label', { text: 'Phone' }), phone,
 
     el('div', { class: 'divider' }),
     el('div', { class: 'muted', text: 'TWO-FACTOR AUTHENTICATION' }),

@@ -65,8 +65,10 @@ USERS
   users list
   users show <username>
   users create <username> <user|admin> [--password P] [--full-name N] [--description D] [--email E]
+                                        [--display-name N] [--office-location L] [--department D] [--phone P] [--network-id ID]
   users set-role <username> <user|admin>
   users set-email <username> <email>
+  users set-directory-info <username> [--display-name N] [--office-location L] [--department D] [--phone P] [--network-id ID]
   users reset-password <username> [--password P] [--keep-must-change]
   users disable <username>
   users enable <username>
@@ -78,6 +80,11 @@ USERS
   An account created here always starts emailVerified: true if given an
   email (an admin vouches for the address) — self-registration (POST
   /api/v1/register) is the only flow that starts unverified.
+
+  Display name / office building-suite / department / phone / network ID
+  are directory fields synced in from Rally — admin/CLI-managed only,
+  there is no self-service edit path for any of them (see README's
+  "Directory fields" section).
 
 APPS
   apps list
@@ -194,17 +201,44 @@ async function main() {
       console.log(JSON.stringify(await userStore.getProfile(user.uid), null, 2));
     } else if (sub === 'create') {
       const [username, role] = positional;
-      if (!username || (role !== 'user' && role !== 'admin')) { console.error('Usage: users create <username> <user|admin> [--password P] [--full-name N] [--description D] [--email E]'); process.exit(1); }
+      if (!username || (role !== 'user' && role !== 'admin')) { console.error('Usage: users create <username> <user|admin> [--password P] [--full-name N] [--description D] [--email E] [--display-name N] [--office-location L] [--department D] [--phone P] [--network-id ID]'); process.exit(1); }
       const password = flags.password || genPassword();
       // Password requirements are enforced only on self-service changes
       // (see src/utils/enforcePasswordPolicy.js) — a temp password set
       // here, from the console, is exempt by design. An email given here
       // starts emailVerified: true (an admin vouches for the address) —
       // see userStore.create().
-      const profile = await userStore.create({ username, password, role, fullName: flags['full-name'] || '', description: flags.description || '', email: flags.email || '' });
+      const profile = await userStore.create({
+        username, password, role, fullName: flags['full-name'] || '', description: flags.description || '', email: flags.email || '',
+        displayName: flags['display-name'] || '', officeLocation: flags['office-location'] || '', department: flags.department || '',
+        phone: flags.phone || '', networkId: flags['network-id'] || '',
+      });
       console.log(`Created "${profile.username}" (${profile.role}).`);
       if (!flags.password) { warnSecretOutput(); console.log(`Temporary password: ${password}`); }
       console.log('Forced to change password on first login.');
+    } else if (sub === 'set-directory-info') {
+      // Bundled rather than one setter per field (unlike set-email/
+      // set-role) since these five are naturally synced together from
+      // Rally — a sync job calling this once per account is the
+      // expected caller, not an admin typing five separate commands.
+      // Only flags actually passed are changed; the rest are left alone.
+      const user = await requireUser(positional[0]);
+      const updates = {};
+      if (flags['display-name'] !== undefined) updates.displayName = flags['display-name'] || null;
+      if (flags['office-location'] !== undefined) updates.officeLocation = flags['office-location'] || null;
+      if (flags.department !== undefined) updates.department = flags.department || null;
+      if (flags.phone !== undefined) updates.phone = flags.phone || null;
+      if (flags['network-id'] !== undefined) updates.networkId = flags['network-id'] || null;
+      if (!Object.keys(updates).length) {
+        console.error('Usage: users set-directory-info <username> [--display-name N] [--office-location L] [--department D] [--phone P] [--network-id ID]');
+        process.exit(1);
+      }
+      const profile = await userStore.update(user.uid, updates);
+      console.log(`Updated directory info for "${profile.username}":`);
+      console.log(JSON.stringify({
+        displayName: profile.displayName, officeLocation: profile.officeLocation,
+        department: profile.department, phone: profile.phone, networkId: profile.networkId,
+      }, null, 2));
     } else if (sub === 'set-email') {
       const [username, email] = positional;
       const user = await requireUser(username);
