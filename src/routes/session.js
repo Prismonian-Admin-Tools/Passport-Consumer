@@ -66,12 +66,16 @@ module.exports = function sessionRoutes({ userStore, failedLoginStore, activityL
       return res.status(401).json({ error: 'Incorrect username or password.' });
     }
 
-    // Same contract question as /api/v1/login: an unverified email blocks
-    // sign-in. In practice this almost never fires here — only admin-
-    // created or bootstrap accounts are expected to use this frontend,
-    // and an admin-created account with an email starts verified — but
-    // it's checked for consistency rather than assumed impossible.
-    if (!result.user.email_verified) {
+    // Same contract question as /api/v1/login: an email that's on file
+    // but hasn't been confirmed blocks sign-in. Deliberately gated on
+    // having an email AT ALL, not just on email_verified being false —
+    // bootstrap.js and admin-created accounts routinely have no email on
+    // file (emailVerified defaults to false in that case too, since
+    // there's nothing to verify), and "no address to confirm" is not the
+    // same condition as "an address we're still waiting on a click for."
+    // Getting this wrong locks every admin out of their own install the
+    // moment there's no second admin left to fix it from the panel.
+    if (result.user.email && !result.user.email_verified) {
       return res.status(403).json({ error: 'This account\'s email address has not been verified yet.' });
     }
 

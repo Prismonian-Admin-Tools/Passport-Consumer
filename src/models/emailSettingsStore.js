@@ -20,6 +20,7 @@ class EmailSettingsStore {
       hasPassword: !!row.encrypted_password,
       fromAddress: row.from_address,
       fromName: row.from_name,
+      rejectUnauthorizedTls: row.reject_unauthorized_tls,
       updatedAt: row.updated_at,
     };
   }
@@ -45,10 +46,11 @@ class EmailSettingsStore {
         : null,
       fromAddress: row.from_address,
       fromName: row.from_name,
+      rejectUnauthorizedTls: row.reject_unauthorized_tls,
     };
   }
 
-  async update({ enabled, host, port, secure, username, password, fromAddress, fromName }) {
+  async update({ enabled, host, port, secure, username, password, fromAddress, fromName, rejectUnauthorizedTls }) {
     const sets = [];
     const values = [];
     let i = 1;
@@ -60,6 +62,7 @@ class EmailSettingsStore {
     if (password) { sets.push(`encrypted_password = $${i++}`); values.push(secretBox.encrypt(password, this.encryptionKey)); }
     if (fromAddress !== undefined) { sets.push(`from_address = $${i++}`); values.push(fromAddress || null); }
     if (fromName !== undefined) { sets.push(`from_name = $${i++}`); values.push(String(fromName || 'Passport Consumer').slice(0, 60)); }
+    if (rejectUnauthorizedTls !== undefined) { sets.push(`reject_unauthorized_tls = $${i++}`); values.push(!!rejectUnauthorizedTls); }
     if (!sets.length) return this.get();
     await this.pool.query(`UPDATE email_settings SET ${sets.join(', ')}, updated_at = now() WHERE id = 1`, values);
     return this.get();

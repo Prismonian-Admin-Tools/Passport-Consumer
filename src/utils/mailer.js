@@ -30,6 +30,13 @@ class Mailer {
         port: settings.port,
         secure: settings.secure,
         auth: settings.username ? { user: settings.username, pass: settings.password } : undefined,
+        // Verifies the relay's certificate on a STARTTLS upgrade by
+        // default (same secure-by-default posture as database.ssl in
+        // src/db.js) — an admin running an internal/self-hosted relay
+        // with a self-signed or expired certificate opts OUT explicitly
+        // via the Email tab / `email set-smtp --reject-unauthorized-tls
+        // false` rather than this being silently permissive for everyone.
+        tls: { rejectUnauthorized: settings.rejectUnauthorizedTls !== false },
       });
       await transport.sendMail({
         from: settings.fromAddress ? `"${settings.fromName}" <${settings.fromAddress}>` : settings.fromName,
@@ -38,7 +45,16 @@ class Mailer {
       return { sent: true };
     } catch (err) {
       console.error(`Failed to send email "${subject}" to ${to}:`, err.message);
-      return { sent: false, reason: 'send-failed' };
+      // The specific reason (bad auth, connection refused, certificate
+      // expired, unknown host, ...) is exactly what an admin needs to
+      // diagnose a misconfigured relay, and this is already an admin-
+      // only code path (routes/email.js's /test is requireAdmin-gated;
+      // every other caller here only logs the result, never displays
+      // it to anyone) — collapsing it to a generic 'send-failed' before
+      // it was previously the only thing distinguishing "wrong password"
+      // from "wrong host" from "untrusted certificate" without reading
+      // the server's own console.
+      return { sent: false, reason: 'send-failed', detail: err.message };
     }
   }
 

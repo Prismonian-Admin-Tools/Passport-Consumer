@@ -1883,12 +1883,16 @@ async function renderEmailSettings(content) {
   const password = el('input', { type: 'password', placeholder: settings.hasPassword ? '•••••••• (unchanged)' : 'SMTP password' });
   const fromAddress = el('input', { type: 'text', value: settings.fromAddress || '', placeholder: 'noreply@example.com' });
   const fromName = el('input', { type: 'text', value: settings.fromName || 'Passport Consumer' });
+  const rejectUnauthorizedTls = el('input', { type: 'checkbox' }); rejectUnauthorizedTls.checked = settings.rejectUnauthorizedTls !== false;
   const errEl = el('div', { class: 'err' });
 
   async function save() {
     errEl.textContent = '';
     try {
-      const body = { enabled: enabled.checked, host: host.value, port: port.value, secure: secure.checked, username: username.value, fromAddress: fromAddress.value, fromName: fromName.value };
+      const body = {
+        enabled: enabled.checked, host: host.value, port: port.value, secure: secure.checked, username: username.value,
+        fromAddress: fromAddress.value, fromName: fromName.value, rejectUnauthorizedTls: rejectUnauthorizedTls.checked,
+      };
       if (password.value) body.password = password.value;
       await api('/email-settings', { method: 'PUT', body });
       toast('Email settings saved', 'ok');
@@ -1918,6 +1922,7 @@ async function renderEmailSettings(content) {
       el('label', { text: 'Password' }), password,
       el('label', { text: 'From address' }), fromAddress,
       el('label', { text: 'From name' }), fromName,
+      el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:400' }, [rejectUnauthorizedTls, el('span', { text: 'Verify TLS certificate (turn off only for a trusted internal relay with a self-signed or expired certificate)' })]),
       errEl,
       el('button', { class: 'btn-primary', text: 'Save', style: 'margin-top:14px', onclick: save }),
     ]),

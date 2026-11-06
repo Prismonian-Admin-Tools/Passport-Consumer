@@ -92,7 +92,7 @@ Response `status` is always exactly one of:
 | `good_change_pw` | valid credentials, but must change password before continuing |
 | `bad` | wrong username or password (never reveals which) — also returned for every request against an app that isn't registered with the `passport` auth method, since this endpoint isn't that app's login contract |
 | `disabled` | account exists and password is correct, but is disabled |
-| `unverified` | valid credentials, but the account's email hasn't been confirmed yet (self-registered accounts only — see `/register` above) |
+| `unverified` | valid credentials, but the account HAS an email on file that hasn't been confirmed yet (self-registered accounts only in practice — see `/register` above; an account with no email at all is never blocked by this, since there's nothing to confirm) |
 | `good-no-access` | valid credentials, but an admin has blocked this specific user from this specific app (see [Per-app access control](#per-app-access-control)) |
 | `good_mfa_required` | valid credentials, but this account has MFA enabled and this app has opted into handling it (see [MFA](#multi-factor-authentication-dormant)) |
 
@@ -370,6 +370,18 @@ at `/api/email-settings` (Email tab, admin only) or `email set-smtp` /
 send mail; it's never returned by any read endpoint. Sending is a no-op
 (never an error toward the caller) whenever email is disabled,
 unconfigured, or the recipient has no address on file.
+
+A relay's TLS certificate is verified by default on a STARTTLS upgrade —
+turn off "Verify TLS certificate" (Email tab) / pass
+`--reject-unauthorized-tls false` to `email set-smtp` only for a trusted
+internal/self-hosted relay with a self-signed or expired certificate;
+anything reachable over an untrusted network should keep verification on.
+`POST /email-settings/test` (Email tab's "Send a test email") and
+`email send-test` in the CLI return the SMTP library's actual failure
+reason (bad host, connection refused, auth rejected, certificate
+problem, ...), not a generic "failed" — that detail is exactly what's
+needed to tell a wrong password apart from an untrusted certificate
+apart from an unreachable host.
 
 | email | sent when |
 |---|---|

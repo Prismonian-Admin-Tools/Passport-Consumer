@@ -1,6 +1,6 @@
 'use strict';
 // Usage:
-//   npm run bootstrap -- --username adrian [--app someapp]
+//   npm run bootstrap -- --username adrian [--email adrian@example.com] [--app someapp]
 //   (prompts for the temporary password, input hidden)
 //
 // --password "temporary-pw-123" still works for scripted/CI use, but a
@@ -12,6 +12,13 @@
 // no special-casing, since there's no onboarding-skip path in this fork
 // (see decision #1 and #2 in README) — and, optionally, registers a
 // first client app, printing its secret ONCE.
+//
+// --email is optional — an account with none is perfectly loggable-in
+// (the email-verification gate only blocks an account that HAS an
+// address on file and hasn't confirmed it; see src/routes/session.js and
+// src/routes/apiV1.js) — but giving one here starts it emailVerified:
+// true immediately, same "an admin vouches for the address" rule as
+// `users create --email` and `users set-email` in passport-cli.js.
 const { loadConfig } = require('../src/config');
 const { initPool } = require('../src/db');
 const { UserStore } = require('../src/models/userStore');
@@ -26,10 +33,11 @@ function arg(name, fallback = null) {
 
 async function main() {
   const username = arg('username');
+  const email = arg('email');
   const appSlug = arg('app');
 
   if (!username) {
-    console.error('Usage: npm run bootstrap -- --username <name> [--password <pw>] [--app <slug>]');
+    console.error('Usage: npm run bootstrap -- --username <name> [--password <pw>] [--email <addr>] [--app <slug>]');
     process.exit(1);
   }
 
@@ -48,10 +56,11 @@ async function main() {
   const appStore = new AppStore(pool);
 
   const profile = await userStore.create({
-    username, password, role: 'admin', fullName: '', description: 'Bootstrap admin account',
+    username, password, role: 'admin', fullName: '', description: 'Bootstrap admin account', email: email || undefined,
   });
   console.log(`\nCreated admin account "${profile.username}" (uid ${profile.uid}).`);
-  console.log('mustChangePassword is set — they will be forced to pick a new password on first login.\n');
+  console.log('mustChangePassword is set — they will be forced to pick a new password on first login.');
+  console.log(email ? `Email set to ${email} (starts verified).\n` : 'No email set — this account can still log in; add one later with `users set-email` if you want account-lifecycle notifications.\n');
 
   if (appSlug) {
     const { app, secret } = await appStore.create({ slug: appSlug, name: appSlug });

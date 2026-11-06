@@ -106,8 +106,14 @@ module.exports = function apiV1Routes({ userStore, appStore, sessionStore, faile
     // Valid credentials, but the self-registration email link hasn't been
     // clicked yet (see POST /register and decision #2 in README) — no
     // token issued, and finishLogin() is never reached, same "no partial
-    // access" posture as the MFA-pending path below.
-    if (!result.user.email_verified) {
+    // access" posture as the MFA-pending path below. Gated on having an
+    // email AT ALL, not just on email_verified being false: an admin-
+    // created account with no email on file (bootstrap.js's own account
+    // included) also has emailVerified: false, since there's nothing to
+    // verify — that's a different condition from "has an address, still
+    // waiting on the click," and must not be refused the same way, or an
+    // app-facing login for that account is permanently unverifiable too.
+    if (result.user.email && !result.user.email_verified) {
       return res.json({ status: 'unverified' });
     }
 

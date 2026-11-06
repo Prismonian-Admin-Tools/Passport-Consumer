@@ -113,7 +113,7 @@ PASSWORD POLICY
 
 EMAIL (SMTP)
   email show
-  email set-smtp [--host H] [--port P] [--secure true|false] [--username U] [--password P] [--from-address A] [--from-name N]
+  email set-smtp [--host H] [--port P] [--secure true|false] [--username U] [--password P] [--from-address A] [--from-name N] [--reject-unauthorized-tls true|false]
   email enable | disable
   email send-test <address>
 
@@ -208,7 +208,14 @@ async function main() {
     } else if (sub === 'set-email') {
       const [username, email] = positional;
       const user = await requireUser(username);
-      const profile = await userStore.update(user.uid, { email: email || null });
+      // Same trust rule as `users create` with --email: an admin setting
+      // an address FROM THE CONSOLE is vouching for it immediately, same
+      // as creation-time — there's no equivalent of the self-registration
+      // verify-email flow for an address added here after the fact, so
+      // leaving emailVerified at whatever it was (often false, if the
+      // account started with none) would otherwise lock the account out
+      // of login the moment it has an address on file.
+      const profile = await userStore.update(user.uid, { email: email || null, emailVerified: !!email });
       console.log(`"${profile.username}"'s email is now ${profile.email || '(cleared)'}.`);
     } else if (sub === 'set-role') {
       const [username, role] = positional;
@@ -428,6 +435,7 @@ async function main() {
       const settings = await emailSettingsStore.update({
         host: flags.host, port: flags.port, secure: flags.secure !== undefined ? flags.secure !== 'false' : undefined,
         username: flags.username, password: flags.password, fromAddress: flags['from-address'], fromName: flags['from-name'],
+        rejectUnauthorizedTls: flags['reject-unauthorized-tls'] !== undefined ? flags['reject-unauthorized-tls'] !== 'false' : undefined,
       });
       console.log('SMTP settings updated:', JSON.stringify(settings, null, 2));
     } else if (sub === 'enable') {
@@ -440,7 +448,7 @@ async function main() {
       const to = positional[0];
       if (!to) { console.error('Usage: email send-test <address>'); process.exit(1); }
       const result = await mailer.sendMail({ to, subject: 'Passport Consumer test email', html: '<p>This is a test email from the Passport Consumer CLI.</p>' });
-      console.log(result.sent ? `Sent to ${to}.` : `Not sent: ${result.reason}`);
+      console.log(result.sent ? `Sent to ${to}.` : `Not sent: ${result.detail || result.reason}`);
     } else {
       console.error('Unknown email subcommand. See --help.'); process.exit(1);
     }

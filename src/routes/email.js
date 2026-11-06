@@ -14,8 +14,8 @@ module.exports = function emailRoutes({ emailSettingsStore, mailer, userStore, a
 
   router.put('/email-settings', express.json(), async (req, res) => {
     try {
-      const { enabled, host, port, secure, username, password, fromAddress, fromName } = req.body || {};
-      const settings = await emailSettingsStore.update({ enabled, host, port, secure, username, password, fromAddress, fromName });
+      const { enabled, host, port, secure, username, password, fromAddress, fromName, rejectUnauthorizedTls } = req.body || {};
+      const settings = await emailSettingsStore.update({ enabled, host, port, secure, username, password, fromAddress, fromName, rejectUnauthorizedTls });
       await activityLog.add('email', `${actorName(req)} updated the SMTP settings`, actor(req), actorName(req));
       res.json({ ok: true, settings });
     } catch (err) {
@@ -32,7 +32,7 @@ module.exports = function emailRoutes({ emailSettingsStore, mailer, userStore, a
         to, subject: 'Passport Consumer test email',
         html: `<p>This is a test email from Passport Consumer, sent by ${req.session.user.username}. If you got this, SMTP is working.</p>`,
       });
-      if (!result.sent) return res.status(400).json({ error: `Not sent: ${result.reason}` });
+      if (!result.sent) return res.status(400).json({ error: result.detail ? `Not sent: ${result.detail}` : `Not sent: ${result.reason}` });
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
