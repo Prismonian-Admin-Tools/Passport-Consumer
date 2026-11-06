@@ -3,7 +3,22 @@ const express = require('express');
 const { toProfile, toAppProfile, omitMfaEnabled, isPasswordExpired } = require('../models/userStore');
 const { enforcePasswordPolicy } = require('../utils/enforcePasswordPolicy');
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Deliberately stricter than a loose "looks like an email" check: this
+// value becomes nodemailer's `to` address (see mailer.sendVerifyEmail)
+// and a historically buggy class of address-parser vulnerabilities in
+// that library (RFC 5322 comments/quoted-strings/angle-brackets/semicolon
+// address-groups being misread — e.g. GHSA-cc9r-2j5m-2m83, GHSA-g73g-
+// hqqh-jr95, GHSA-m943-m63m-w62w) can make a stored address LOOK like
+// one recipient while mail is actually delivered to another. Restricting
+// to a plain dot-atom local-part and a label.label domain — no `"()<>;,`
+// — closes that class off at the application boundary regardless of
+// which nodemailer version is installed. The length cap is a second,
+// independent defense: several of those same advisories are quadratic-
+// time/catastrophic-backtracking bugs in the library's own address
+// parser that only bite on a long crafted string (RFC 5321's own limit
+// is 254 characters, so this costs nothing for a real address).
+const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+const EMAIL_MAX_LENGTH = 254;
 
 function clientIp(req) {
   return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
@@ -281,7 +296,7 @@ module.exports = function apiV1Routes({ userStore, appStore, sessionStore, faile
     if (!username || typeof username !== 'string' || !password || typeof password !== 'string' || !email || typeof email !== 'string') {
       return res.status(400).json({ status: 'invalid_request', error: 'username, password, and email are required strings' });
     }
-    if (!EMAIL_RE.test(email)) {
+    if (email.length > EMAIL_MAX_LENGTH || !EMAIL_RE.test(email)) {
       return res.status(400).json({ status: 'invalid_request', error: 'email does not look like a valid address' });
     }
 
