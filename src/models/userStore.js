@@ -139,14 +139,29 @@ class UserStore {
   async verify(username, password) {
     const user = await this.findByUsername(username);
     if (!user) {
-      // Same bcrypt cost as the real path below, so an unknown username
-      // doesn't return conspicuously faster than a wrong password for a
-      // real one — see passwords.verifyDummy().
-      passwords.verifyDummy();
+      // Same cost as the real path below, so an unknown username doesn't
+      // return conspicuously faster than a wrong password for a real one
+      // — see passwords.verifyDummy().
+      await passwords.verifyDummy();
       return { status: 'bad' };
     }
-    if (!passwords.verify(password, user.password_hash)) return { status: 'bad' };
+    if (!(await passwords.verify(password, user.password_hash))) return { status: 'bad' };
     if (user.disabled) return { status: 'disabled' };
+
+    // Transparent storage upgrade: a successful login against a hash this
+    // module would no longer produce itself (a legacy bcrypt hash, or an
+    // Argon2id hash whose parameters have since been strengthened) gets
+    // silently re-hashed under the CURRENT scheme — no reset email, no
+    // password_history entry (the credential itself hasn't changed, only
+    // how it's stored), no action required from the user. Best-effort:
+    // the login itself has already succeeded either way, so a failure
+    // here is logged, not surfaced.
+    if (passwords.needsRehash(user.password_hash)) {
+      passwords.hash(password)
+        .then((newHash) => this.pool.query('UPDATE passwords SET password_hash = $1 WHERE uid = $2', [newHash, user.uid]))
+        .catch((err) => console.error(`Failed to upgrade password hash for ${user.uid}:`, err.message));
+    }
+
     const status = (user.must_change_password || isPasswordExpired(user)) ? 'good_change_pw' : 'good';
     return { status, user };
   }
@@ -178,6 +193,7 @@ class UserStore {
     if (existing) throw new Error('A user with that username already exists');
 
     const emailVerified = selfRegistered ? false : !!email;
+    const passwordHash = await passwords.hash(password);
 
     const client = await this.pool.connect();
     let uid;
@@ -188,7 +204,7 @@ class UserStore {
       await client.query('INSERT INTO usernames (uid, username) VALUES ($1, $2)', [uid, username.trim()]);
       await client.query(
         'INSERT INTO passwords (uid, password_hash, password_simhash, must_change_password) VALUES ($1, $2, $3, $4)',
-        [uid, passwords.hash(password), simhash64(password), !selfRegistered]
+        [uid, passwordHash, simhash64(password), !selfRegistered]
       );
       await client.query(
         'INSERT INTO userdata (uid, role, full_name, description, email, email_verified) VALUES ($1, $2, $3, $4, $5, $6)',
@@ -267,11 +283,12 @@ class UserStore {
     // which permanently locks that user out (forced into the change
     // screen, but every change attempt 403s on cannot_change_password).
     const mustChange = !clearMustChange;
+    const passwordHash = await passwords.hash(newPassword);
     await this.pool.query(
       `UPDATE passwords SET password_hash = $1, password_simhash = $2, must_change_password = $3,
          cannot_change_password = CASE WHEN $3 THEN false ELSE cannot_change_password END, updated_at = now()
        WHERE uid = $4`,
-      [passwords.hash(newPassword), simhash64(newPassword), mustChange, uid]
+      [passwordHash, simhash64(newPassword), mustChange, uid]
     );
     await this.pool.query('DELETE FROM password_expiry_notices WHERE uid = $1', [uid]);
 

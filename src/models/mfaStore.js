@@ -50,7 +50,7 @@ class MfaStore {
     for (let i = 0; i < BACKUP_CODE_COUNT; i++) {
       const code = crypto.randomBytes(5).toString('hex').toUpperCase().match(/.{1,5}/g).join('-');
       codes.push(code);
-      await this.pool.query('INSERT INTO mfa_backup_codes (uid, code_hash) VALUES ($1, $2)', [uid, passwords.hash(code)]);
+      await this.pool.query('INSERT INTO mfa_backup_codes (uid, code_hash) VALUES ($1, $2)', [uid, await passwords.hash(code)]);
     }
     return codes;
   }
@@ -81,7 +81,7 @@ class MfaStore {
   async verifyBackupCode(uid, code) {
     const { rows } = await this.pool.query('SELECT id, code_hash FROM mfa_backup_codes WHERE uid = $1 AND used_at IS NULL', [uid]);
     for (const row of rows) {
-      if (passwords.verify(code, row.code_hash)) {
+      if (await passwords.verify(code, row.code_hash)) {
         await this.pool.query('UPDATE mfa_backup_codes SET used_at = now() WHERE id = $1', [row.id]);
         return true;
       }

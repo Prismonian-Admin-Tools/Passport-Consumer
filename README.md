@@ -477,6 +477,17 @@ its password on first login after either — no flag turns that off.
 
 - Nobody — including admins — can ever retrieve a stored password. An
   admin can only reset one.
+- User passwords are hashed with **Argon2id** (`src/utils/passwords.js`),
+  the OWASP Password Storage Cheat Sheet's current first recommendation
+  and the Password Hashing Competition winner, at OWASP's recommended
+  minimum profile (19 MiB memory, 2 iterations, single-threaded) — its
+  memory-hardness is specifically what raises the cost of a GPU/ASIC
+  cracking attempt far above a fixed-cost scheme like bcrypt. A hash made
+  before this (bcrypt) or under weaker Argon2id parameters still verifies
+  correctly and is transparently re-hashed under the current scheme on
+  that account's next successful login — no forced reset, no downtime,
+  no action from the user (see `userStore.verify()`). MFA backup codes
+  reuse the same module/algorithm.
 - A self-registered account can't sign in until its email is verified
   (`/api/v1/login` returns `unverified`, no token issued); an
   admin-created account always starts with `mustChangePassword: true`
@@ -524,3 +535,28 @@ its password on first login after either — no flag turns that off.
   controlled data — a single bad `X-App-Id` header can't crash the
   process or become a type-cast error surfacing as an unhandled
   rejection.
+
+### Transport & config secrets
+
+- Passport Consumer itself speaks plain HTTP and binds to `127.0.0.1` by
+  default — it's meant to sit behind a TLS-terminating reverse proxy
+  (nginx, Caddy, a cloud load balancer), not be exposed directly. Point
+  that proxy at `server.bind`/`server.port`, terminate TLS 1.2+ there
+  with a real certificate, and set `server.trustProxy` to the number of
+  proxy hops in front of the app so the real client IP (used for login-
+  lockout and rate-limiting) is read correctly instead of being spoofable
+  via `X-Forwarded-For`. `Strict-Transport-Security` is sent automatically
+  once a request actually arrives over HTTPS (`src/middleware/
+  securityHeaders.js`) — nothing to configure there.
+- `server.sessionSecret` and `server.encryptionKey` are checked at
+  startup (`src/config.js`) and the process refuses to boot if either is
+  missing, shorter than 32 random characters, left at the
+  `config.yml.example` placeholder value, or identical to each other —
+  see that file's comments for why, and generate real values with
+  `openssl rand -base64 48`.
+- `database.ssl: true` now means real certificate verification against
+  the system CA bundle, not just an encrypted-but-unverified connection
+  — set `database.sslCaFile` for a self-signed/internal CA rather than
+  reaching for `database.sslRejectUnauthorized: false`, which disables
+  verification entirely and should only ever be a deliberate, temporary
+  local-dev choice (see `src/db.js`).

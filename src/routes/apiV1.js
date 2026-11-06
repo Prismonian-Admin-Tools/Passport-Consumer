@@ -210,7 +210,7 @@ module.exports = function apiV1Routes({ userStore, appStore, sessionStore, faile
     }
     if (!user.must_change_password) {
       const { verify } = require('../utils/passwords');
-      if (!verify(currentPassword, user.password_hash)) {
+      if (!(await verify(currentPassword, user.password_hash))) {
         return res.status(401).json({ status: 'invalid_request', error: 'Current password is incorrect' });
       }
     }

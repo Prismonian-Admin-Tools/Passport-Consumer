@@ -49,7 +49,7 @@ module.exports = function mfaRoutes({ userStore, mfaStore }) {
     try {
       const uid = myUid(req);
       const user = await userStore.findByUid(uid);
-      if (!verifyPassword(req.body?.currentPassword, user.password_hash)) throw new Error('Current password is incorrect');
+      if (!(await verifyPassword(req.body?.currentPassword, user.password_hash))) throw new Error('Current password is incorrect');
       await mfaStore.disable(uid);
       res.json({ ok: true });
     } catch (err) {

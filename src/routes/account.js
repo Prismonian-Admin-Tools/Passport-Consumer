@@ -59,7 +59,7 @@ module.exports = function accountRoutes({ config, userStore, passwordPolicyStore
       if (newPassword !== confirmPassword) throw new Error('New password and confirmation do not match');
       // A forced change doesn't require the old password — that's the point of "forced."
       if (!user.must_change_password) {
-        if (!verifyPassword(currentPassword, user.password_hash)) throw new Error('Current password is incorrect');
+        if (!(await verifyPassword(currentPassword, user.password_hash))) throw new Error('Current password is incorrect');
       }
       await enforcePasswordPolicy({ passwordPolicyStore, userStore, uid, password: newPassword });
       const profile = await userStore.resetPassword(uid, newPassword, { clearMustChange: true });

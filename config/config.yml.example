@@ -7,17 +7,25 @@ server:
   port: 9300
   # Signs Passport Consumer's OWN frontend session cookie (used when a
   # person logs into the admin panel directly). Unrelated to the opaque
-  # app tokens issued to client apps — change this to something random.
+  # app tokens issued to client apps.
+  #
+  # Both secrets below are checked at startup (src/config.js) and
+  # REFUSED if they're missing, shorter than 32 random characters, left
+  # at one of these example placeholder values, or identical to each
+  # other — a deployment that silently ran with a guessable or shared
+  # secret is a worse failure mode than one that won't start. Generate a
+  # real value for each with:
+  #   openssl rand -base64 48
   sessionSecret: "CHANGE_ME_TO_A_RANDOM_STRING"
   # Encrypts values Passport Consumer must be able to read back later: the
-  # SMTP password, a user's MFA secret, and the OIDC signing key at rest.
-  # Deliberately a SEPARATE secret from sessionSecret — one key now
-  # covering two unrelated jobs (signing session cookies AND protecting
-  # data at rest) meant a leak of either purpose compromised both, and
-  # rotating sessionSecret silently broke decryption of everything else.
-  # Change this to a different random value than sessionSecret. Rotating
-  # it means re-entering the SMTP password and any enrolled MFA secrets
-  # (users just re-run setup) afterward.
+  # SMTP password, a user's MFA secret, and the OIDC signing key at rest
+  # (AES-256-GCM — see src/utils/secretBox.js). Deliberately a SEPARATE
+  # secret from sessionSecret — one key now covering two unrelated jobs
+  # (signing session cookies AND protecting data at rest) meant a leak of
+  # either purpose compromised both, and rotating sessionSecret silently
+  # broke decryption of everything else. Rotating this one means
+  # re-entering the SMTP password and any enrolled MFA secrets (users
+  # just re-run setup) afterward.
   encryptionKey: "CHANGE_ME_TO_A_DIFFERENT_RANDOM_STRING"
   # Public base URL — used for building absolute avatar links and the
   # links emailed by the self-service registration flow (POST /api/v1/
@@ -40,7 +48,20 @@ database:
   name: "passport_consumer"
   user: "passport_consumer"
   password: "CHANGE_ME"
+  # false is fine ONLY when Postgres is on localhost/a private network
+  # segment the app server also sits on (as the default `host` above
+  # assumes). Set true for anything crossing an untrusted network (a
+  # managed/cloud Postgres, a separate host) — this verifies the server's
+  # certificate against the system CA bundle, it does not just encrypt
+  # the wire. Point sslCaFile at a PEM file if Postgres uses a private/
+  # self-signed CA (common for self-managed clusters); only set
+  # sslRejectUnauthorized: false as a deliberate, temporary opt-out
+  # (e.g. local dev against a throwaway self-signed cert) — it disables
+  # certificate verification entirely, so a MITM on the DB connection
+  # becomes invisible.
   ssl: false
+  # sslCaFile: "/etc/passport-consumer/db-ca.pem"
+  # sslRejectUnauthorized: true
 
 avatars:
   directory: "./data/avatars"
