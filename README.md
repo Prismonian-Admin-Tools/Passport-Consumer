@@ -262,6 +262,13 @@ always gets the same generic failure back from them (`bad` /
 instead), since that app isn't supposed to be calling those endpoints at
 all.
 
+A third value, `gam`, does not exist yet — for an app that needs to let
+Global-Admin-Account-System (Prismonian's separate internal staff/admin
+identity service) accounts sign in alongside Passport Consumer's own
+self-registered ones, see
+[`docs/gam-auth-method.md`](docs/gam-auth-method.md) for what building
+that would actually involve.
+
 ## Federated identity: Passport Consumer as an OpenID Connect Provider
 
 Some apps can be taught the native `passport` contract above; others —
