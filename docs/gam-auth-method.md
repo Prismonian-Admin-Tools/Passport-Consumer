@@ -1,124 +1,141 @@
-# Adding a `gam` auth method (federating with Global-Admin-Account-System)
+# Adding a `gam` Authentication Method (Federation with Global-Admin-Account-System)
 
-This is a **design/implementation guide for a feature that does not
-exist yet** — `apps.auth_method` accepts exactly two values today,
-`passport` and `oidc` (`src/models/appStore.js`'s `AUTH_METHODS`). There
-is no code anywhere in this codebase that speaks to
-Global-Admin-Account-System ("GAM"). If you're picking this up, this
-document is the starting point, not a changelog.
+This document is a design and implementation guide for a feature that
+does not yet exist in this codebase. The `apps.auth_method` column
+currently accepts exactly two values, `passport` and `oidc` (see
+`AUTH_METHODS` in `src/models/appStore.js`). No code in this repository
+communicates with Global-Admin-Account-System ("GAM"). This document is
+intended as the starting point for an implementer, not a record of work
+already completed.
 
-## Why this would exist
+## 1. Rationale
 
-Passport Consumer is this fork's own, independent identity service for
-**end users who self-register** into Prismonian's own apps (see the
-README's "Self-service registration" section). Global-Admin-Account-
-System is the separate, sibling service this project was forked from —
-it's Prismonian's **internal staff/admin** identity provider: ranks
-(`trustedInstaller`/`systemAdministrator`/`elevatedStaff`/`staff`), no
-self-registration, admin-provisioned accounts only.
+Passport Consumer is an independent identity service for end users who
+self-register into Prismonian's own applications (see the README's
+"Self-service registration" section). Global-Admin-Account-System is
+the separate, sibling service from which this project was forked; it is
+Prismonian's internal staff/administrative identity provider, built
+around ranks (`trustedInstaller`, `systemAdministrator`,
+`elevatedStaff`, `staff`), with no self-registration and
+administrator-provisioned accounts only.
 
-Some Prismonian app is presumably going to want **both kinds of user**
-signing into the same login screen — a consumer who self-registered via
-Passport Consumer, and a Prismonian employee whose account lives in GAM
-(support staff moderating that app, say). That app shouldn't have to
-integrate two separate identity providers, maintain two sets of
-credentials, or know which one a given username belongs to. A `gam` auth
-method lets that app keep calling Passport Consumer's own
-`/api/v1/login` contract exactly as it does today, with Passport
-Consumer forwarding the credential check to GAM behind the scenes for
-apps registered under this method.
+A Prismonian application may require both account types to authenticate
+through a single login screen — a consumer who self-registered through
+Passport Consumer, and a Prismonian employee whose account resides in
+GAM (for example, support staff moderating that application). Such an
+application should not be required to integrate two separate identity
+providers, maintain two sets of credentials, or determine in advance
+which provider a given username belongs to. A `gam` authentication
+method would allow that application to continue calling Passport
+Consumer's existing `/api/v1/login` contract exactly as it does today,
+with Passport Consumer forwarding the credential check to GAM for any
+application registered under this method.
 
-**This is the inverse of [OIDC federation](../README.md#federated-identity-passport-consumer-as-an-openid-connect-provider).**
-There, Passport Consumer is the identity provider and some other system
-consumes it. Here, Passport Consumer would be the **relying party**,
-and GAM is the identity provider. Don't reuse the OIDC code path for
-this — GAM speaks the same proprietary `/api/v1/login` token contract
-Passport Consumer does (same lineage), not OIDC.
+This is the inverse of [OIDC federation](../README.md#federated-identity-passport-consumer-as-an-openid-connect-provider).
+In that case, Passport Consumer functions as the identity provider and
+another system consumes it. In this case, Passport Consumer would
+function as the relying party, with GAM as the identity provider. The
+existing OIDC code path should not be reused for this purpose: GAM
+speaks the same proprietary `/api/v1/login` token contract that
+Passport Consumer does, by virtue of shared lineage, not OIDC.
 
-## The contract you'd be calling
+## 2. The Contract to Be Consumed
 
-GAM's app-facing login contract (`POST /api/v1/login` on a GAM
+GAM's application-facing login contract (`POST /api/v1/login` on a GAM
 instance, documented in that project's own README) is structurally
-almost identical to Passport Consumer's own, because Passport Consumer
-was forked from it:
+almost identical to Passport Consumer's own, as a consequence of
+Passport Consumer having been forked from it:
 
 ```
 POST https://<gam-host>/api/v1/login
-X-App-Id: <a GAM-issued appId — NOT a Passport Consumer appId>
-X-App-Secret: <that app's GAM-issued secret>
+X-App-Id: <a GAM-issued appId, distinct from any Passport Consumer appId>
+X-App-Secret: <that application's GAM-issued secret>
 Content-Type: application/json
 
 { "username": "...", "password": "..." }
 ```
 
-Response `status` is one of: `good`, `good_change_pw`, `bad`,
-`disabled`, `good-no-access`, `good_mfa_required` (if GAM's calling-app
-record has `supportsMfaChallenge` set). **There is no `unverified`** —
-GAM has no self-registration or email-verification concept at all, and
-no `/register` or `/resend-verification` endpoints either.
+The `status` field in the response is one of: `good`, `good_change_pw`,
+`bad`, `disabled`, `good-no-access`, or `good_mfa_required` (the last
+only if GAM's calling-application record has `supportsMfaChallenge`
+set). There is no `unverified` status — GAM has no self-registration or
+email-verification concept, and no `/register` or
+`/resend-verification` endpoints.
 
-The critical detail: **the `X-App-Id`/`X-App-Secret` pair GAM expects
-is a credential issued BY GAM, to Passport Consumer itself** — it has
-nothing to do with the `appId`/`appSecret` the Prismonian app presents
-to Passport Consumer's own `/api/v1/*`. Passport Consumer would need to
-be registered as **one single app inside GAM** (e.g. `bootstrap -- --
-app passport-consumer-bridge` run once against the GAM instance), and
-hold that one GAM credential pair itself — not one per Prismonian app
-that opts into `auth_method: 'gam'`. Several Passport Consumer apps
-federating with GAM all share that same one upstream credential.
+A critical point requiring attention: the `X-App-Id`/`X-App-Secret`
+pair GAM expects is a credential issued by GAM to Passport Consumer
+itself, and is unrelated to the `appId`/`appSecret` a Prismonian
+application presents to Passport Consumer's own `/api/v1/*`
+endpoints. Passport Consumer would need to be registered as a single
+application within GAM (for example, via `bootstrap -- --app
+passport-consumer-bridge`, run once against the GAM instance) and would
+hold that one GAM credential pair at the service level — not one per
+Prismonian application that opts into `auth_method: 'gam'`. Multiple
+Passport Consumer applications federating with GAM would share the
+same upstream credential.
 
-## What would actually need to change
+## 3. Required Changes
 
-### 1. Schema
-Add `'gam'` to the `auth_method` CHECK constraint
-(`src/migrations/001_init.sql` — write a new migration, don't edit that
-one) and to `AUTH_METHODS` in `src/models/appStore.js`.
+### 3.1 Schema
 
-### 2. Passport Consumer's own GAM credential
-This is a **service-level** secret (one per Passport Consumer
-deployment, not per registered app), so it belongs in `config.yml`
-alongside `server.sessionSecret`/`server.encryptionKey`/`database.*` —
-not in a database table edited from the admin panel like SMTP settings,
-since there's nothing here an admin would plausibly change without a
-restart, and no multi-value history to keep. Something like:
+Add `'gam'` to the `auth_method` CHECK constraint (originally defined in
+`src/migrations/001_init.sql`; this should be introduced via a new
+migration, not an edit to that file) and to `AUTH_METHODS` in
+`src/models/appStore.js`.
+
+### 3.2 Passport Consumer's GAM Credential
+
+This is a service-level secret — one per Passport Consumer deployment,
+not one per registered application — and should be stored in
+`config.yml` alongside `server.sessionSecret`, `server.encryptionKey`,
+and `database.*`, rather than in a database table editable from the
+admin panel in the manner of SMTP settings, since no value here would
+plausibly be changed by an administrator without a restart, and no
+revision history is required. A representative structure:
 
 ```yaml
 gam:
   baseUrl: "https://gam.internal.prismonian.com"
   appId: "..."
-  appSecret: "..."       # the secret GAM printed ONCE at bootstrap/apps create time
+  appSecret: "..."       # the secret GAM displays once, at bootstrap or app-creation time
   timeoutMs: 5000
 ```
 
-Validate it the same way `src/config.js` already validates
-`sessionSecret`/`encryptionKey` — fail closed at startup if
-`gam.appSecret` looks like a placeholder, rather than discovering a
-misconfiguration on the first login attempt.
+This value should be validated at startup using the same approach
+`src/config.js` already applies to `sessionSecret`/`encryptionKey` —
+failing closed if `gam.appSecret` appears to be a placeholder, rather
+than allowing the misconfiguration to surface on the first login
+attempt.
 
-### 3. A GAM client module
-New file, e.g. `src/utils/gamClient.js` — a thin wrapper, structurally
-similar to how `src/utils/mailer.js` wraps nodemailer: one `login(username,
-password)` method that POSTs to `${gam.baseUrl}/api/v1/login` with the
-configured headers and returns GAM's parsed JSON. Things to get right,
-all lessons already paid for elsewhere in this codebase:
+### 3.3 A GAM Client Module
 
-- **Timeout.** An outbound HTTP call inside a request handler that never
-  times out is exactly the kind of thing that can tie up the whole
-  event loop under load — set `gam.timeoutMs` and abort cleanly. A GAM
-  outage should fail a login attempt, not hang the request indefinitely.
-- **Don't leak which system is down.** A GAM connection failure,
-  timeout, or 5xx should collapse to the same generic failure
-  `/api/v1/login` already uses for "this app isn't using the right
-  contract" — never reveal to the calling app (or an attacker) that
-  there's a second system behind this one, let alone that it's
-  unreachable right now.
-- **TLS verification.** This is a service-to-service call over whatever
-  network sits between the two systems — same "verify by default,
-  explicit opt-out only for a known-trusted internal host" posture as
+A new file, for example `src/utils/gamClient.js`, should provide a thin
+wrapper structurally similar to how `src/utils/mailer.js` wraps
+nodemailer: a single `login(username, password)` method that issues a
+POST to `${gam.baseUrl}/api/v1/login` with the configured headers and
+returns GAM's parsed response. The following considerations, each
+already addressed elsewhere in this codebase, apply equally here:
+
+- **Timeout.** An outbound HTTP call within a request handler that
+  never times out can tie up the event loop under load. `gam.timeoutMs`
+  should be enforced, with the call aborted cleanly on expiry. A GAM
+  outage should result in a failed login attempt, not an indefinitely
+  hung request.
+- **Failure disclosure.** A GAM connection failure, timeout, or 5xx
+  response should collapse to the same generic failure `/api/v1/login`
+  already returns when an application is not using the expected
+  contract. The existence of a second system behind this one, and
+  whether that system is currently reachable, should not be disclosed
+  to the calling application or to an attacker.
+- **TLS verification.** This is a service-to-service call across
+  whatever network separates the two systems, and should follow the
+  same "verify by default, with an explicit opt-out limited to a
+  known-trusted internal host" posture already applied to
   `database.ssl` (`src/db.js`) and the SMTP relay TLS option
-  (`src/utils/mailer.js`), not a new one invented from scratch.
+  (`src/utils/mailer.js`), rather than introducing a new policy.
 
-### 4. The login route itself
+### 3.4 The Login Route
+
 In `src/routes/apiV1.js`'s `POST /login`, the existing gate —
 
 ```js
@@ -127,92 +144,110 @@ if (req.callingApp.auth_method !== 'passport') {
 }
 ```
 
-— needs a branch for `req.callingApp.auth_method === 'gam'` that calls
-the new client instead of `userStore.verify()`. The hard part isn't
-calling GAM; it's **what to do with a successful result**, because
-every downstream piece of this codebase — `sessionStore`, `app_access`
-(per-app blocking), `activityLog`, the admin panel's Users tab —
-assumes a `uid` that exists in Passport Consumer's own `users` table.
+— would require a branch for `req.callingApp.auth_method === 'gam'`
+that invokes the new client in place of `userStore.verify()`. The more
+significant design question is not the GAM call itself but how to
+handle a successful result, since every downstream component in this
+codebase — `sessionStore`, `app_access` (per-application blocking),
+`activityLog`, and the admin panel's Users tab — assumes a `uid` that
+exists in Passport Consumer's own `users` table.
 
 **Recommended approach: a shadow account.** On a successful GAM login,
-look up (by username) or create a Passport Consumer user row that
-mirrors the GAM identity, then proceed exactly as the native path does
-(`sessionStore.issue`, `touchLogin`, the unknown-logon-point email,
-etc.) against that shadow `uid`. Concretely:
+the implementation should look up (by username) or create a Passport
+Consumer user row mirroring the GAM identity, then proceed as the
+native login path does (`sessionStore.issue`, `touchLogin`, the
+unknown-logon-point email, and so on) against that shadow `uid`.
+Specifically:
 
-- Add a marker so these rows are recognizable later — e.g.
-  `userdata.gam_username TEXT` (nullable; non-null means "this account
-  is a GAM mirror, not a Passport Consumer native account") — rather
-  than overloading an existing column.
-- **The shadow account's `role` in Passport Consumer is always `user`,
-  never derived from the GAM account's rank.** GAM's rank governs
-  administration rights *inside GAM*; it says nothing about whether this
-  person should be able to administer *Passport Consumer*. Collapsing a
-  GAM `systemAdministrator` into a Passport Consumer `admin` by accident
-  here would be a privilege-escalation bug, not a convenience.
-- Passport Consumer's own password fields (`password_hash`, etc.) are
-  meaningless for a shadow account — nobody should ever be able to log
-  into one through the native `/api/v1/login` path with a
-  Passport-Consumer-local password. Either enforce `cannot_change_password:
-  true` and a hash that can never match (e.g. store nothing usable, or a
-  dedicated `is_gam_shadow` flag checked before the native `verify()`
-  path runs at all), or keep shadow accounts out of `usernames`/
-  `passwords` entirely and rethink the four-table join for this one
-  case — this needs a real decision, not a guess; don't ship whichever
-  of these is easiest without confirming the native login path can't be
-  used to impersonate a shadow account.
-- Refresh the mirrored fields (disabled, display info) on every
-  successful login, not just at creation — a GAM account disabled or
-  renamed after its first federated login shouldn't keep working here
-  indefinitely on stale data.
-- `app_access` (per-app blocking) works unchanged once there's a real
-  `uid` — an admin can still block one specific GAM-federated user from
-  one specific Prismonian app without touching GAM at all.
+- A marker should be added so these rows can be identified later —
+  for example, a nullable `userdata.gam_username TEXT` column, where a
+  non-null value indicates the account is a GAM mirror rather than a
+  Passport Consumer native account — rather than overloading an
+  existing column.
+- **The shadow account's `role` in Passport Consumer must always be
+  `user`, and must never be derived from the GAM account's rank.**
+  GAM's rank governs administrative rights within GAM; it has no
+  bearing on whether a given person should be able to administer
+  Passport Consumer. Mapping a GAM `systemAdministrator` to a Passport
+  Consumer `admin` would constitute a privilege-escalation defect, not
+  a convenience.
+- Passport Consumer's own password fields (`password_hash`, and
+  related columns) are not meaningful for a shadow account; it must not
+  be possible to authenticate to one through the native
+  `/api/v1/login` path using a Passport-Consumer-local password.
+  Either `cannot_change_password: true` should be enforced together
+  with a hash that can never match (for example, storing no usable
+  value), with a dedicated flag checked before the native `verify()`
+  path executes, or shadow accounts should be excluded from
+  `usernames`/`passwords` entirely, which would require revisiting the
+  four-table join for this case. This decision should be made
+  deliberately; whichever approach is simplest to implement should not
+  be adopted without first confirming that the native login path cannot
+  be used to impersonate a shadow account.
+- Mirrored fields (disabled status, display information) should be
+  refreshed on every successful login, not only at creation, so that a
+  GAM account disabled or renamed after its first federated login does
+  not continue operating on stale data.
+- `app_access` (per-application blocking) functions without
+  modification once a real `uid` exists — an administrator retains the
+  ability to block a specific GAM-federated user from a specific
+  Prismonian application without any change on the GAM side.
 
-### 5. `/api/v1/register` and `/api/v1/resend-verification`
-GAM has no self-registration concept. An app registered under
-`auth_method: 'gam'` should get the same generic non-functional
-response from these that an `oidc` app gets today — add `'gam'` to
-whatever check currently only allows `'passport'` through.
+### 3.5 `/api/v1/register` and `/api/v1/resend-verification`
 
-### 6. MFA
-Out of scope for a first version. GAM has its own dormant MFA; Passport
-Consumer's `good_mfa_required`/`/login/mfa` dance is built around
-Passport Consumer's *own* `mfa_enabled`/`mfa_secret` columns, which a
-shadow account has no meaningful value for. Decide explicitly (and
-document it when you do) whether a GAM account with MFA enabled there
-should be rejected, passed through via a second round-trip to GAM's own
-`/login/mfa`, or just not supported — don't let this fall through
-silently as an unconsidered gap.
+GAM has no self-registration concept. An application registered under
+`auth_method: 'gam'` should receive the same generic, non-functional
+response from these endpoints that an `oidc` application receives
+today; `'gam'` should be added to whichever check currently permits
+only `'passport'` through.
 
-### 7. Activity log
-`activityLog.add('auth', ...)` calls elsewhere already say
-`"signed in via ${req.callingApp.slug}"` — say `"signed in via
-${req.callingApp.slug} (GAM-federated)"` or similar here too, so the
-audit trail doesn't quietly conflate the two credential sources.
+### 3.6 Multi-Factor Authentication
 
-## What stays the same
+This is out of scope for an initial implementation. GAM has its own
+dormant MFA mechanism; Passport Consumer's `good_mfa_required`/
+`/login/mfa` flow is built around Passport Consumer's own
+`mfa_enabled`/`mfa_secret` columns, which carry no meaningful value for
+a shadow account. A deliberate decision should be made, and documented,
+as to whether a GAM account with MFA enabled should be rejected, passed
+through via a second round-trip to GAM's own `/login/mfa`, or left
+unsupported. This should not be allowed to pass unaddressed as an
+unconsidered gap.
 
-Per-app access blocking, session issuance/revocation/"sign out
-everywhere", rate limiting, OIDC federation (an app can independently
-also be `oidc` — these are different apps' settings, not combinable on
-one app), and the admin panel's Users tab all keep working unmodified
-once there's a real shadow `uid` — none of them currently care how an
-account was authenticated, only that it has one.
+### 3.7 Activity Log
 
-## Testing this for real
+Existing `activityLog.add('auth', ...)` calls elsewhere record
+`"signed in via ${req.callingApp.slug}"`. The equivalent call for this
+path should record `"signed in via ${req.callingApp.slug}
+(GAM-federated)"` or similar, so that the audit trail does not conflate
+the two credential sources.
 
-Reproducing a federation bug by reading code gets you nowhere — stand up
-an actual (or stubbed) GAM instance and drive the real HTTP path, the
-same way the SMTP mailer bugs in this codebase were found: a fresh
-Postgres database, migrations run, a real Passport Consumer process,
-and either a cloned GAM instance or a minimal stand-in server that
-speaks just enough of `/api/v1/login` to exercise `good`/`bad`/
-`disabled`/`good-no-access`/`good_mfa_required`, a slow/timeout
-response, and a connection refused. Confirm: a successful GAM login
-issues a real Passport Consumer token the calling app can use against
-`/validate` and `/logout` exactly like a native login; a GAM-side
-block/disable is reflected on the NEXT login, not retroactively on an
-already-issued token; and a GAM outage fails closed with the same
-generic response shape as every other "can't tell you why" case in this
-contract.
+## 4. Unaffected Components
+
+Per-application access blocking, session issuance and revocation
+(including "sign out everywhere"), rate limiting, OIDC federation (an
+application may independently also be configured as `oidc` — these are
+settings of different applications, not combinable on a single
+application), and the admin panel's Users tab all continue to function
+without modification once a genuine shadow `uid` exists. None of these
+components are currently concerned with how an account was
+authenticated, only with the fact that it has an account.
+
+## 5. Verification Approach
+
+Reproducing a federation defect by code inspection alone is not a
+reliable method of verification. A real or stubbed GAM instance should
+be stood up and the actual HTTP path exercised, following the same
+approach used to identify the SMTP mailer defects previously found in
+this codebase: a fresh PostgreSQL database, migrations applied, a
+running Passport Consumer process, and either a cloned GAM instance or
+a minimal substitute server implementing enough of `/api/v1/login` to
+exercise `good`, `bad`, `disabled`, `good-no-access`,
+`good_mfa_required`, a delayed/timeout response, and a refused
+connection. The following should be confirmed: a successful GAM login
+issues a genuine Passport Consumer token usable by the calling
+application against `/validate` and `/logout`, identically to a native
+login; a block or disable applied on the GAM side takes effect on the
+subsequent login attempt rather than retroactively against an
+already-issued token; and a GAM outage fails closed using the same
+generic response shape applied to every other non-disclosed failure
+case in this contract.
