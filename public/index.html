@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Passport Consumer</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 <style>
   :root {
     --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
@@ -424,19 +427,18 @@ function brandmark() {
       el('span', { class: 'word', text: state.branding.siteName }),
     ]);
   }
-  // A passport booklet outline with a simple portrait-and-shoulders emblem
-  // in the middle — inline so it recolors with the active theme via the
-  // same CSS vars every other icon uses, no image asset needed.
-  const logo = `<svg class="logo" viewBox="0 0 26 26" xmlns="http://www.w3.org/2000/svg">
-    <rect x="4" y="2" width="18" height="22" rx="2.5" fill="none" stroke="var(--text-dim)" stroke-width="1.6" opacity=".55"/>
-    <circle cx="13" cy="10.3" r="3.2" fill="var(--accent)" opacity=".9"/>
-    <path d="M8.3 18.6c1.15-1.7 2.8-2.5 4.7-2.5s3.55.8 4.7 2.5" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" opacity=".85"/>
-  </svg>`;
+  // Default brandmark when no admin has uploaded a custom logo — the
+  // Passport shield mark, served as a static asset under public/brand/
+  // (not re-themeable via CSS vars the way the old inline-SVG placeholder
+  // was, since it's a fixed raster image now).
   const name = state.branding.siteName || 'Passport Consumer';
   const wordHtml = name === 'Passport Consumer'
     ? 'Passport <span>Consumer</span>'
     : name.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-  return el('div', { class: 'brandmark', html: `${logo}<span class="word">${wordHtml}</span>` });
+  return el('div', { class: 'brandmark' }, [
+    el('img', { class: 'logo', src: '/brand/logo-mark.png', alt: '' }),
+    el('span', { class: 'word', html: wordHtml }),
+  ]);
 }
 
 /**
